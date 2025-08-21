@@ -6,6 +6,7 @@ import shutil
 import random
 import requests
 import webbrowser
+import sys
 import json
 import base64
 from tkinter import filedialog
@@ -17,29 +18,54 @@ from CTkMessagebox import CTkMessagebox
 __version__ = "2.6.0"
 VERSION_URL = "https://gist.githubusercontent.com/anisio/d54c7286381b16b471696b99b59e74bb/raw/7027877e5d269894982bf0be7341e97486e96906/version.txt"
 UPDATE_URL = "https://github.com/anisio"
+YOUTUBE_TUTORIAL_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_ID"
 LICENSE_TEXT = """
-MIT License
+Licença de Uso e Termos de Serviço do PrismaFX
+Copyright (c) 2025 PrismaFX & Luiz F. R. Pimentel
 
-Copyright (c) 2025 [Seu Nome ou Nome do Projeto]
+Este software é licenciado sob os termos da Licença MIT, detalhada abaixo.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+---
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+A permissão é concedida, gratuitamente, a qualquer pessoa que obtenha uma cópia deste software e dos arquivos de documentação associados (o "Software"), para negociar o Software sem restrições, incluindo, sem limitação, os direitos de:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN an ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+• Usar o software para qualquer finalidade (pessoal, comercial, etc.).
+• Copiar, modificar e mesclar cópias do software.
+• Publicar, distribuir, sublicenciar e/ou vender cópias do Software.
+
+A única condição é que o aviso de direitos autorais acima e este aviso de permissão sejam incluídos em todas as cópias ou partes substanciais do Software.
+
+---
+
+AVISO SOBRE A API NÃO OFICIAL
+
+PrismaFX depende de uma API não oficial para se comunicar com os serviços do Google ImageFX. Este programa não possui afiliação, patrocínio ou endosso do Google.
+
+Como a API não é pública ou documentada, ela pode ser alterada ou desativada pelo Google a qualquer momento, sem aviso prévio, o que faria este programa parar de funcionar permanentemente. Ao usar este software, você reconhece e aceita este risco integralmente.
+
+---
+
+O SOFTWARE É FORNECIDO "COMO ESTÁ" (AS IS)
+
+Este software é disponibilizado sem nenhuma garantia, expressa ou implícita, incluindo, mas não se limitando a, garantias de comercialização, adequação a um propósito específico e não violação de direitos.
+
+LIMITAÇÃO DE RESPONSABILIDADE
+
+EM NENHUMA CIRCUNSTÂNCIA OS AUTORES OU DETENTORES DOS DIREITOS AUTORAIS SERÃO RESPONSÁVEIS POR QUALQUER REIVINDICAÇÃO, DANOS OU OUTRA RESPONSABILIDADE, SEJA EM UMA AÇÃO DE CONTRATO, DELITO OU DE OUTRA FORMA, DECORRENTE DE, OU EM CONEXÃO COM O SOFTWARE OU O USO OU OUTRAS NEGOCIAÇÕES NO SOFTWARE.
 """
+
+# --- FUNÇÃO HELPER PARA ENCONTRAR ARQUIVOS (ASSETS) ---
+def resource_path(relative_path):
+    """ Obtém o caminho absoluto para o recurso, funciona para dev e para PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temp e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 
 # --- CLASSE DYNAMIC COMBOBOX ---
 class DynamicComboBox(ctk.CTkComboBox):
@@ -47,14 +73,24 @@ class DynamicComboBox(ctk.CTkComboBox):
         super().__init__(*args, **kwargs)
         self._is_open = False
         self.bind("<Button-1>", self._toggle_dropdown, add="+")
-        if hasattr(self, '_dropdown_menu'):
-             self._dropdown_menu.bind("<FocusOut>", self._on_focus_out, add="+")
+
+    def _open_dropdown(self):
+        # Sobrescrevemos o método de abrir para atualizar nosso estado
+        super()._open_dropdown()
+        self._is_open = True
+
+    def _close_dropdown(self):
+        # Sobrescrevemos o método de fechar para atualizar nosso estado
+        super()._close_dropdown()
+        self._is_open = False
+
     def _toggle_dropdown(self, event):
         if self._is_open:
-            self.focus_set(); self._is_open = False; return "break"
-        else: self._is_open = True
-    def _on_focus_out(self, event):
-        self._is_open = False
+            self._close_dropdown()  # Fecha o menu se estiver aberto
+            return "break"        # Impede que o evento de clique padrão tente reabri-lo
+        else:
+            # Se estiver fechado, a ação padrão do CTkComboBox vai abrir o menu
+            pass
 
 # --- APLICAÇÃO PRINCIPAL ---
 ctk.set_appearance_mode("Dark")
@@ -63,8 +99,36 @@ ctk.set_default_color_theme("blue")
 class ImageFXApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Gerador de Imagens ImageFX (em Lote)")
+        # --- CONTROLE DA JANELA DE DOAÇÃO ---
+        # Variável para ligar/desligar a funcionalidade (True = ligada, False = desligada)
+        self.ENABLE_DONATION_REMINDER = True
         
+        # Carrega a configuração do arquivo JSON
+        self.config = self._load_config()
+
+        # Incrementa o contador de execuções
+        self.config["execution_count"] += 1
+        count = self.config["execution_count"]
+
+        # Verifica se deve mostrar a janela de "Sobre" para doação
+        if self.ENABLE_DONATION_REMINDER and not self.config.get("user_has_donated", False):
+            # Mostra na primeira e na quinta execução
+            if count == 1 or count == 5: # Lógica simplificada para o ciclo
+                # Usamos 'after' para garantir que a janela principal apareça primeiro
+                self.after(100, self.show_about_window)
+
+        # <<< NOVA LÓGICA: Reseta o contador se ele atingir 5 >>>
+        if count >= 5:
+            self.config["execution_count"] = 0
+
+        # Salva a configuração atualizada no arquivo JSON
+        self._save_config()
+
+        # Salva a configuração atualizada no arquivo JSON
+        self._save_config()
+        # --- FIM DO CONTROLE ---
+        self.title("PrismaFX - Gerador ImageFX em Lote")
+        self._editable_fg_color = ("#F0F0F0", "#272525")
         window_width = 900
         window_height = 700
         screen_width = self.winfo_screenwidth()
@@ -82,6 +146,7 @@ class ImageFXApp(ctk.CTk):
         atexit.register(self.cleanup)
         self.all_results = []
         self.current_page_index = 0
+        self.image_display_frame = None # Frame que conterá as imagens
         self.grid_columnconfigure(0, weight=1, minsize=400)
         self.grid_columnconfigure(1, weight=2)
         self.grid_rowconfigure(0, weight=1)
@@ -110,9 +175,8 @@ class ImageFXApp(ctk.CTk):
         auth_frame.pack(fill="x", padx=10, pady=(0, 5))
         auth_frame.grid_columnconfigure(0, weight=1)
         auth_frame.grid_columnconfigure(1, weight=0)
-        self.auth_token_entry = ctk.CTkEntry(auth_frame, placeholder_text="Cole o seu token aqui")
+        self.auth_token_entry = ctk.CTkEntry(auth_frame, placeholder_text="Cole o seu token aqui", fg_color=self._editable_fg_color)
         self.auth_token_entry.grid(row=0, column=0, sticky="ew")
-        self._editable_fg_color = self.auth_token_entry.cget("fg_color")
         self.token_help_button = ctk.CTkButton(auth_frame, text="?", width=30, command=self.show_token_help)
         self.token_help_button.grid(row=0, column=1, padx=(5, 0))
         self._default_border_color = self.auth_token_entry.cget("border_color")
@@ -156,8 +220,8 @@ class ImageFXApp(ctk.CTk):
         options_frame.pack(fill="x", pady=5)
         options_frame.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkLabel(options_frame, text="Proporção").grid(row=0, column=0, padx=10, pady=(5,0), sticky="w")
-        self.ratio_var = ctk.StringVar(value="Square (1:1)")
-        self.ratio_menu = DynamicComboBox(options_frame, variable=self.ratio_var, values=["Square (1:1)", "Portrait (9:16)", "Landscape (16:9)"], state="readonly")
+        self.ratio_var = ctk.StringVar(value="Quadrado (1:1)")
+        self.ratio_menu = DynamicComboBox(options_frame, variable=self.ratio_var, values=["Quadrado (1:1)", "Retrato (9:16)", "Paisagem (16:9)"], state="readonly")
         self.ratio_menu.grid(row=1, column=0, padx=10, pady=(0,10), sticky="ew")
         ctk.CTkLabel(options_frame, text="Imagens por Prompt").grid(row=0, column=1, padx=10, pady=(5,0), sticky="w")
         self.count_var = ctk.StringVar(value="1")
@@ -218,67 +282,174 @@ class ImageFXApp(ctk.CTk):
 
     def show_token_help(self):
         help_win = ctk.CTkToplevel(self)
-        help_win.title("Como Obter o Token de Autenticação")
-        help_win.geometry("550x420")
-        help_win.minsize(550, 420)
-        help_win.maxsize(550, 420)
+        help_win.title("PrismaFX - Como Obter o Token de Autenticação")
+        help_win.geometry("550x480") # Aumentamos um pouco a altura
         help_win.transient(self)
         help_win.grab_set()
+        help_win.resizable(False, False)
+
         js_script = 'let script = document.querySelector("#__NEXT_DATA__");\nlet obj = JSON.parse(script.textContent);\nconsole.log(obj.props.pageProps.session.access_token);'
+        
         def copy_script_to_clipboard():
             self.clipboard_clear()
             self.clipboard_append(js_script)
             copy_button.configure(text="Copiado!")
             self.after(2000, lambda: copy_button.configure(text="Copiar Código para o Console"))
-        ctk.CTkLabel(help_win, text="Passo a Passo para Obter o Token", font=("", 16, "bold")).pack(pady=(10, 15))
+
+        ctk.CTkLabel(help_win, text="Passo a Passo para Obter o Token", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 15))
+
         instructions_frame = ctk.CTkFrame(help_win, fg_color="transparent")
         instructions_frame.pack(fill="x", padx=20)
+
+        # <<< BOTÃO PARA O VÍDEO ADICIONADO AQUI >>>
+        video_button = ctk.CTkButton(instructions_frame, text="▶️ Como Obter o Token (YouTube)", 
+                                     command=lambda: webbrowser.open_new(YOUTUBE_TUTORIAL_URL))
+        video_button.pack(fill="x", pady=(0, 15))
+
+        # --- O resto das instruções continua igual ---
         ctk.CTkButton(instructions_frame, text="1. Abra o site do ImageFX no seu navegador", command=lambda: webbrowser.open_new("https://labs.google/fx/pt/tools/image-fx")).pack(fill="x", pady=4)
         ctk.CTkLabel(instructions_frame, text="2. No site, pressione a tecla F12 para abrir as Ferramentas de Desenvolvedor.", justify="left").pack(anchor="w", pady=4)
         ctk.CTkLabel(instructions_frame, text="3. Vá para a aba 'Console'.", justify="left").pack(anchor="w", pady=4)
         ctk.CTkLabel(instructions_frame, text="4. Copie o código abaixo e cole no console. Pressione Enter.", justify="left").pack(anchor="w", pady=4)
+
         code_textbox = ctk.CTkTextbox(help_win, height=80, wrap="word")
         code_textbox.pack(fill="x", padx=20, pady=5)
         code_textbox.insert("1.0", js_script)
         code_textbox.configure(state="disabled")
+        
         copy_button = ctk.CTkButton(help_win, text="Copiar Código para o Console", command=copy_script_to_clipboard)
         copy_button.pack(pady=8, padx=20)
+        
         ctk.CTkLabel(help_win, text="5. O token será exibido. Copie e cole no campo de autenticação do programa.", justify="left", wraplength=500).pack(anchor="w", padx=20, pady=4)
         ctk.CTkButton(help_win, text="Fechar", command=help_win.destroy).pack(side="bottom", pady=15)
+        
         self._center_window(help_win)
 
+    # Janela de "Sobre"
     def show_about_window(self):
         about_win = ctk.CTkToplevel(self)
-        about_win.title("Sobre o Gerador ImageFX")
-        about_win.geometry("400x250"); about_win.transient(self); about_win.grab_set()
-        about_win.minsize(400, 250)
-        about_win.maxsize(400, 250)
-        ctk.CTkLabel(about_win, text="Gerador ImageFX em Lote", font=("", 16, "bold")).pack(pady=(10,5))
-        ctk.CTkLabel(about_win, text=f"Versão {__version__}").pack()
-        ctk.CTkLabel(about_win, text="Este programa utiliza a API não oficial do ImageFX\npara gerar imagens em massa.", justify="center").pack(pady=10)
-        ctk.CTkButton(about_win, text="Fechar", command=about_win.destroy).pack(pady=20)
-        self._center_window(about_win)
+        about_win.withdraw()
+        about_win.title("Sobre o PrismaFX") # Nome do projeto atualizado
+        about_win.transient(self)
+        about_win.grab_set()
 
+        window_width = 600
+        window_height = 700
+        
+        # Centraliza a janela
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        center_x = int(screen_width / 2 - window_width / 2)
+        center_y = int(screen_height / 2 - window_height / 2)
+        about_win.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
+        about_win.minsize(window_width, window_height)
+        about_win.maxsize(window_width, window_height) 
+
+        about_win.grid_columnconfigure(0, weight=1)
+        about_win.grid_rowconfigure(0, weight=1)
+
+        main_frame = ctk.CTkScrollableFrame(about_win)
+        main_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        main_frame.grid_columnconfigure(0, weight=1)
+        
+        header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(10, 10))
+        title_label = ctk.CTkLabel(header_frame, text="PrismaFX - Gerador ImageFX em Lote", font=ctk.CTkFont(size=20, weight="bold"))
+        title_label.pack()
+        version_label = ctk.CTkLabel(header_frame, text=f"Versão {__version__}", font=ctk.CTkFont(size=12))
+        version_label.pack()
+        
+        dev_label = ctk.CTkLabel(main_frame, text="Desenvolvido por: Luiz F. R. Pimentel", font=ctk.CTkFont(size=14, weight="bold"))
+        dev_label.pack(pady=0)
+        description_text = "Uma ferramenta de automação para otimizar a criação de imagens em lote, potencializada pela tecnologia ImageFX do Google Labs."
+        description_label = ctk.CTkLabel(main_frame, text=description_text, wraplength=480, justify="center")
+        description_label.pack(padx=20)
+        
+        donation_frame = ctk.CTkFrame(main_frame)
+        donation_frame.pack(fill="x", padx=20, pady=10)
+        donation_frame.grid_columnconfigure(0, weight=1)
+        donation_title = ctk.CTkLabel(donation_frame, text="Apoie este Projeto", font=ctk.CTkFont(size=13, weight="bold"))
+        donation_title.pack(pady=5)
+        try:
+            qrcode_path = resource_path("assets/qrcode_pix.png")
+            pil_image = Image.open(qrcode_path)
+            qrcode_image = ctk.CTkImage(light_image=pil_image, size=(160, 160))
+            qrcode_label = ctk.CTkLabel(donation_frame, image=qrcode_image, text="")
+            qrcode_label.pack(pady=5)
+            donation_text_label = ctk.CTkLabel(donation_frame, text="Escaneie o QR Code para fazer um PIX", wraplength=400)
+            donation_text_label.pack(pady=8)
+        except FileNotFoundError:
+            error_label = ctk.CTkLabel(donation_frame, text="Erro: qrcode_pix.png não encontrado na pasta 'assets'.", text_color="red")
+            error_label.pack(pady=15, padx=10)
+        
+        notice_frame = ctk.CTkFrame(main_frame, border_width=1)
+        notice_frame.pack(fill="x", padx=20)
+        notice_title = ctk.CTkLabel(notice_frame, text="Aviso Importante", font=ctk.CTkFont(size=13, weight="bold"))
+        notice_title.pack(pady=(10, 5))
+        notice_text = (
+            "Este programa utiliza uma API **não oficial** e não possui afiliação com o Google.\n\n"
+            "A ferramenta pode parar de funcionar a qualquer momento. Use por sua conta e risco."
+        )
+        notice_label = ctk.CTkLabel(notice_frame, text=notice_text, wraplength=480, justify="left")
+        notice_label.pack(pady=(0, 15), padx=15)
+
+        links_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        links_frame.pack(fill="x", padx=20, pady=20)
+        links_frame.grid_columnconfigure((0, 1), weight=1)
+
+        github_url = "https://github.com/anisio" 
+        github_button = ctk.CTkButton(links_frame, text="Ver Projeto no GitHub", command=lambda: webbrowser.open_new(github_url))
+        github_button.grid(row=0, column=0, padx=5, sticky="ew")
+
+        imagefx_url = "https://labs.google/fx/pt/tools/image-fx"
+        imagefx_button = ctk.CTkButton(links_frame, text="Acessar ImageFX Oficial", command=lambda: webbrowser.open_new(imagefx_url))
+        imagefx_button.grid(row=0, column=1, padx=5, sticky="ew")
+
+        video_button_about = ctk.CTkButton(links_frame, text="▶️ Como Usar o PrismaFX (YouTube)", 
+                                           command=lambda: webbrowser.open_new(YOUTUBE_TUTORIAL_URL))
+        # Ocupa as duas colunas na linha de baixo para centralizar
+        video_button_about.grid(row=1, column=0, columnspan=2, padx=5, pady=(10,0), sticky="ew")
+
+        close_button = ctk.CTkButton(main_frame, text="Fechar", command=about_win.destroy, width=120)
+        close_button.pack(pady=(10, 15))
+        
+        about_win.deiconify()
+
+    # Tela de Licença
     def show_license_window(self):
         license_win = ctk.CTkToplevel(self)
-        license_win.title("Licença")
-        license_win.geometry("500x400"); license_win.transient(self); license_win.grab_set()
-        license_win.minsize(500, 400)
-        license_win.maxsize(500, 400)
-        ctk.CTkLabel(license_win, text="Licença de Uso (MIT)", font=("", 16, "bold")).pack(pady=(10,5))
+        license_win.title("PrismaFX - Licença e Termos de Uso")
+        
+        # Aumentamos o tamanho da janela para o novo texto
+        window_width = 600
+        window_height = 650
+        
+        # Centraliza a janela
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        center_x = int(screen_width / 2 - window_width / 2)
+        center_y = int(screen_height / 2 - window_height / 2)
+        license_win.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
+        license_win.resizable(False, False)
+        
+        license_win.transient(self)
+        license_win.grab_set()
+
+        ctk.CTkLabel(license_win, text="Licença de Uso e Termos de Serviço", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(15, 10))
+        
         textbox = ctk.CTkTextbox(license_win, wrap="word")
-        textbox.pack(fill="both", expand=True, padx=10, pady=5)
+        textbox.pack(fill="both", expand=True, padx=15, pady=5)
         textbox.insert("1.0", LICENSE_TEXT)
-        textbox.configure(state="disabled")
-        ctk.CTkButton(license_win, text="Fechar", command=license_win.destroy).pack(pady=10)
-        self._center_window(license_win)
+        textbox.configure(state="disabled") # Bloqueia a edição
+        
+        ctk.CTkButton(license_win, text="Fechar", command=license_win.destroy).pack(pady=15)
 
     def clear_current_prompt(self):
         prompt_index = self.current_prompt_page
         the_textbox = self.prompt_text_widgets[0]['textbox']
         the_textbox.delete("1.0", "end")
         self.prompt_data_list[prompt_index] = ""
-        self.status_label.configure(text=f"Prompt {prompt_index + 1} limpo.")
+        self.status_label.configure(text=f"Prompt {prompt_index + 1} Limpo.")
 
     def paste_to_current_prompt(self):
         try:
@@ -388,17 +559,17 @@ class ImageFXApp(ctk.CTk):
             response.raise_for_status()
             latest_version = response.text.strip()
             if latest_version > __version__:
-                msg = CTkMessagebox(title="Atualização Disponível", 
+                msg = CTkMessagebox(title="PrismaFX - Atualização Disponível", 
                                     message=f"Uma nova versão ({latest_version}) está disponível!\nA sua versão é {__version__}.\n\nDeseja abrir a página de download?",
                                     icon="question", option_1="Não", option_2="Sim")
                 if msg.get() == "Sim":
                     webbrowser.open_new(UPDATE_URL)
                 self.status_label.configure(text="Atualização disponível.")
             else:
-                CTkMessagebox(title="Nenhuma Atualização", message=f"Você já tem a versão mais recente! ({__version__})")
+                CTkMessagebox(title="PrismaFX - Nenhuma Atualização", message=f"Você já tem a versão mais recente! ({__version__})")
                 self.status_label.configure(text="Pronto.")
         except requests.RequestException as e:
-            CTkMessagebox(title="Erro de Rede", message=f"Não foi possível verificar as atualizações.\nErro: {e}", icon="cancel")
+            CTkMessagebox(title="PrismaFX - Erro de Rede", message=f"Não foi possível verificar as atualizações.\nErro: {e}", icon="cancel")
             self.status_label.configure(text="Pronto.")
 
     def _reset_token_entry_style(self, event=None):
@@ -470,9 +641,9 @@ class ImageFXApp(ctk.CTk):
             current_seed = random.randint(100000, 999999)
             self.seed_var.set(str(current_seed))
         ratio_map = {
-            "Square (1:1)": "IMAGE_ASPECT_RATIO_SQUARE",
-            "Portrait (9:16)": "IMAGE_ASPECT_RATIO_PORTRAIT",
-            "Landscape (16:9)": "IMAGE_ASPECT_RATIO_LANDSCAPE"
+            "Quadrado (1:1)": "IMAGE_ASPECT_RATIO_SQUARE",
+            "Retrato (9:16)": "IMAGE_ASPECT_RATIO_PORTRAIT",
+            "Paisagem (16:9)": "IMAGE_ASPECT_RATIO_LANDSCAPE"
         }
         api_ratio = ratio_map.get(prompt_data["ratio"], "IMAGE_ASPECT_RATIO_SQUARE")
         api_model = "IMAGEN_3_5"
@@ -511,7 +682,7 @@ class ImageFXApp(ctk.CTk):
             return new_image_paths
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                self.after(0, lambda: CTkMessagebox(title="Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.\n\nPor favor, obtenha um novo token e cole-o no campo apropriado.", icon="cancel"))
+                self.after(0, lambda: CTkMessagebox(title="PrismaFX - Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.\n\nPor favor, obtenha um novo token e cole-o no campo apropriado.", icon="cancel"))
                 return 'AUTH_ERROR'
             else:
                 print(f"Erro HTTP ao gerar prompt: {e.response.status_code}\n{e.response.text}")
@@ -523,10 +694,20 @@ class ImageFXApp(ctk.CTk):
             return None
 
     def show_page(self, page_index):
-        for widget in self.image_labels: widget.destroy()
-        self.image_labels.clear()
-        if not self.all_results: return
+        # Limpa o frame antigo de imagens, se ele existir
+        if self.image_display_frame is not None:
+            self.image_display_frame.destroy()
+
         self.current_page_index = page_index
+        if not self.all_results: 
+            return
+
+        # Cria um novo frame container para as novas imagens
+        # Este frame fica DENTRO do CTkScrollableFrame
+        self.image_display_frame = ctk.CTkFrame(self.images_scroll_frame, fg_color="transparent")
+        self.image_display_frame.pack(fill="both", expand=True)
+        self.image_display_frame.grid_columnconfigure((0, 1), weight=1)
+
         image_paths_for_page = self.all_results[self.current_page_index]
         self.images_scroll_frame.configure(label_text=f"Resultado do Prompt: {self.current_page_index + 1}")
         self.page_label.configure(text=f"Página {self.current_page_index + 1} de {len(self.all_results)}")
@@ -534,6 +715,7 @@ class ImageFXApp(ctk.CTk):
         self.next_button.configure(state="normal" if self.current_page_index < len(self.all_results) - 1 else "disabled")
         self.save_button.configure(state="normal" if image_paths_for_page else "disabled")
         self.regenerate_current_button.configure(state="normal")
+
         self.display_images(image_paths_for_page)
 
     def display_images(self, image_paths):
@@ -546,12 +728,16 @@ class ImageFXApp(ctk.CTk):
                 new_width = int(width * ratio)
                 new_height = int(height * ratio)
                 ctk_img = ctk.CTkImage(light_image=img, size=(new_width, new_height))
-                img_label = ctk.CTkLabel(self.images_scroll_frame, image=ctk_img, text="")
+
+                # Adiciona o label de imagem ao NOVO frame container
+                img_label = ctk.CTkLabel(self.image_display_frame, image=ctk_img, text="")
+
                 row, col = divmod(i, 2)
                 img_label.grid(row=row, column=col, padx=10, pady=10)
-                self.image_labels.append(img_label)
-            except Exception as e: print(f"Erro ao carregar a imagem {img_path}: {e}")
 
+            except Exception as e: 
+                print(f"Erro ao carregar a imagem {img_path}: {e}")
+                
     def next_page(self):
         if self.current_page_index < len(self.all_results) - 1: self.show_page(self.current_page_index + 1)
 
@@ -561,15 +747,15 @@ class ImageFXApp(ctk.CTk):
     def save_images(self):
         paths_to_save = self.all_results[self.current_page_index]
         if not paths_to_save:
-            CTkMessagebox(title="Nenhuma imagem", message="Não há imagens nesta página para salvar.", icon="warning")
+            CTkMessagebox(title="PrismaFX - Nenhuma imagem", message="Não há imagens nesta página para salvar.", icon="warning")
             return
-        dest_folder = filedialog.askdirectory(title="Selecione uma pasta para salvar as imagens")
+        dest_folder = filedialog.askdirectory(title="PrismaFX - Selecione uma pasta para salvar as imagens")
         if not dest_folder: return
         try:
             for src_path in paths_to_save: shutil.copy2(src_path, dest_folder)
-            CTkMessagebox(title="Sucesso", message=f"{len(paths_to_save)} imagem(ns) salvas com sucesso!")
+            CTkMessagebox(title="PrismaFX - Sucesso", message=f"{len(paths_to_save)} imagem(ns) salvas com sucesso!")
         except Exception as e:
-            CTkMessagebox(title="Erro ao Salvar", message=f"Erro: {e}", icon="cancel")
+            CTkMessagebox(title="PrismaFX - Erro ao Salvar", message=f"Erro: {e}", icon="cancel")
 
     def set_ui_state(self, generating: bool):
         state = "disabled" if generating else "normal"
@@ -587,6 +773,46 @@ class ImageFXApp(ctk.CTk):
             self.regenerate_current_button.configure(state="disabled")
         else:
             if self.all_results: self.show_page(self.current_page_index)
+
+    # Salva as configurações em um arquivo JSON
+    def _load_config(self):
+            """
+            Carrega as configurações de um arquivo JSON de forma robusta.
+            Valida os tipos e valores, e recria o arquivo se estiver corrompido.
+            """
+            default_config = {
+                "header": "ARQUIVO DE CONFIGURACAO DO GERADOR IMAGEFX - NAO EDITE MANUALMENTE",
+                "execution_count": 0,
+            }
+
+            try:
+                with open(resource_path("config.json"), "r") as f:
+                    loaded_config = json.load(f)
+                
+                # Se o arquivo foi lido, agora validamos os dados
+                sanitized_config = default_config.copy()
+
+                # Valida 'execution_count'
+                count = loaded_config.get("execution_count")
+                if isinstance(count, int) and count >= 0:
+                    sanitized_config["execution_count"] = count
+                
+                # Valida 'user_has_donated'
+                donated = loaded_config.get("user_has_donated")
+                if isinstance(donated, bool):
+                    sanitized_config["user_has_donated"] = donated
+
+                return sanitized_config
+
+            except (FileNotFoundError, json.JSONDecodeError, TypeError):
+                # Se o arquivo não existe, é JSON inválido ou os dados estão errados,
+                # retorna a configuração padrão. O arquivo será recriado ao salvar.
+                return default_config
+
+    def _save_config(self):
+        """Salva as configurações atuais em um arquivo JSON."""
+        with open(resource_path("config.json"), "w") as f:
+            json.dump(self.config, f, indent=4)
 
 if __name__ == "__main__":
     app = ImageFXApp()
