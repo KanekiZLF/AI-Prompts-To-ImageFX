@@ -296,7 +296,8 @@ class ImageFXApp(ctk.CTk):
         help_win.geometry("550x480") # Aumentamos um pouco a altura
         help_win.transient(self)
         help_win.grab_set()
-        help_win.resizable(False, False)
+        help_win.minsize(550, 480)
+        help_win.maxsize(550, 480)
 
         js_script = 'let script = document.querySelector("#__NEXT_DATA__");\nlet obj = JSON.parse(script.textContent);\nconsole.log(obj.props.pageProps.session.access_token);'
         
@@ -407,7 +408,7 @@ class ImageFXApp(ctk.CTk):
         links_frame.pack(fill="x", padx=20, pady=20)
         links_frame.grid_columnconfigure((0, 1), weight=1)
 
-        github_url = "https://github.com/KanekiZLF/AI-Prompts-To-ImageFX" 
+        github_url = "https://github.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote" 
         github_button = ctk.CTkButton(links_frame, text="Ver Projeto no GitHub", command=lambda: webbrowser.open_new(github_url))
         github_button.grid(row=0, column=0, padx=5, sticky="ew")
 
