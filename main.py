@@ -9,15 +9,17 @@ import webbrowser
 import sys
 import json
 import base64
+from packaging import version
 from tkinter import filedialog
 from PIL import Image
 import threading
 from CTkMessagebox import CTkMessagebox
 
 # --- INFORMAÇÕES DO PROGRAMA ---
-__version__ = "2.6.0"
-VERSION_URL = "https://gist.githubusercontent.com/anisio/d54c7286381b16b471696b99b59e74bb/raw/7027877e5d269894982bf0be7341e97486e96906/version.txt"
-UPDATE_URL = "https://github.com/anisio"
+__version__ = "2.0.0"
+# URL CORRETA para o arquivo de texto puro
+VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/AI-Prompts-To-ImageFX/master/version.txt"
+UPDATE_URL = "https://github.com/KanekiZLF/AI-Prompts-To-ImageFX"
 YOUTUBE_TUTORIAL_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_ID"
 LICENSE_TEXT = """
 Licença de Uso e Termos de Serviço do PrismaFX
@@ -549,28 +551,53 @@ class ImageFXApp(ctk.CTk):
             self.show_license_window()
         self.settings_var.set("⚙️ Configurações")
     
+    # Verificação de Atualizações
+
     def start_update_check(self):
-        self.status_label.configure(text="A verificar atualizações...")
-        thread = threading.Thread(target=self.check_for_updates); thread.daemon = True; thread.start()
+        """Inicia a verificação de atualização em uma thread separada para não congelar a UI."""
+        self.status_label.configure(text="Verificando atualizações...")
+        # Desabilita o menu para evitar múltiplas verificações
+        self.settings_menu.configure(state="disabled")
+        
+        thread = threading.Thread(target=self.check_for_updates)
+        thread.daemon = True
+        thread.start()
 
     def check_for_updates(self):
+        """Busca a versão mais recente no GitHub e compara com a versão local."""
         try:
-            response = requests.get(VERSION_URL, timeout=5)
-            response.raise_for_status()
-            latest_version = response.text.strip()
-            if latest_version > __version__:
-                msg = CTkMessagebox(title="PrismaFX - Atualização Disponível", 
-                                    message=f"Uma nova versão ({latest_version}) está disponível!\nA sua versão é {__version__}.\n\nDeseja abrir a página de download?",
-                                    icon="question", option_1="Não", option_2="Sim")
+            # Faz a requisição para a URL do arquivo de versão com um timeout
+            headers = {'User-Agent': 'PrismaFX-Update-Checker/1.0'}
+            response = requests.get(VERSION_URL, timeout=5, headers=headers)
+            response.raise_for_status()  # Lança um erro se a resposta não for 200 (OK)
+            
+            latest_version_str = response.text.strip()
+            local_version_str = __version__
+
+            # Compara as versões usando a biblioteca packaging
+            if version.parse(latest_version_str) > version.parse(local_version_str):
+                # Se houver uma nova versão, pergunta ao usuário se ele quer atualizar
+                msg = CTkMessagebox(
+                    title="PrismaFX - Atualização Disponível",
+                    message=f"Uma nova versão ({latest_version_str}) está disponível!\nSua versão é {local_version_str}.\n\nDeseja abrir a página de download?",
+                    icon="question", option_1="Não", option_2="Sim"
+                )
                 if msg.get() == "Sim":
                     webbrowser.open_new(UPDATE_URL)
-                self.status_label.configure(text="Atualização disponível.")
+                self.status_label.configure(text="Atualização disponível. Visite a página para baixar.")
             else:
-                CTkMessagebox(title="PrismaFX - Nenhuma Atualização", message=f"Você já tem a versão mais recente! ({__version__})")
+                # Se o usuário já tem a versão mais recente
+                CTkMessagebox(title="Tudo Certo!", message=f"Você já está com a versão mais recente ({local_version_str}).")
                 self.status_label.configure(text="Pronto.")
+
         except requests.RequestException as e:
-            CTkMessagebox(title="PrismaFX - Erro de Rede", message=f"Não foi possível verificar as atualizações.\nErro: {e}", icon="cancel")
-            self.status_label.configure(text="Pronto.")
+            # Se houver um erro de rede ou de acesso
+            CTkMessagebox(title="Erro de Rede", message=f"Não foi possível verificar as atualizações.\n\nErro: {e}", icon="cancel")
+            self.status_label.configure(text="Falha ao verificar atualizações.")
+        
+        finally:
+            # Reabilita o menu de configurações, independentemente do resultado
+            self.settings_menu.configure(state="readonly")
 
     def _reset_token_entry_style(self, event=None):
         self.auth_token_entry.configure(border_color=self._default_border_color)
