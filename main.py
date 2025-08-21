@@ -18,8 +18,8 @@ from CTkMessagebox import CTkMessagebox
 # --- INFORMAÇÕES DO PROGRAMA ---
 __version__ = "2.0.0"
 # URL CORRETA para o arquivo de texto puro
-VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/AI-Prompts-To-ImageFX/master/version.txt"
-UPDATE_URL = "https://github.com/KanekiZLF/AI-Prompts-To-ImageFX"
+VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote/refs/heads/master/version.txt"
+UPDATE_URL = "https://github.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote"
 YOUTUBE_TUTORIAL_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_ID"
 LICENSE_TEXT = """
 Licença de Uso e Termos de Serviço do PrismaFX
@@ -130,6 +130,14 @@ class ImageFXApp(ctk.CTk):
         self._save_config()
         # --- FIM DO CONTROLE ---
         self.title("PrismaFX - Gerador ImageFX em Lote")
+        try:
+            # Usa nossa função helper para encontrar o ícone na pasta 'assets'
+            icon_path = resource_path("assets/icon.ico")
+            self.iconbitmap(icon_path)
+        except Exception as e:
+            # Se o ícone não for encontrado ou houver um erro, o programa não quebra
+            print(f"Erro ao carregar o ícone: {e}")
+            print("Verifique se o arquivo 'icon.ico' está na pasta 'assets'.")
         self._editable_fg_color = ("#F0F0F0", "#272525")
         window_width = 900
         window_height = 700
@@ -399,7 +407,7 @@ class ImageFXApp(ctk.CTk):
         links_frame.pack(fill="x", padx=20, pady=20)
         links_frame.grid_columnconfigure((0, 1), weight=1)
 
-        github_url = "https://github.com/anisio" 
+        github_url = "https://github.com/KanekiZLF/AI-Prompts-To-ImageFX" 
         github_button = ctk.CTkButton(links_frame, text="Ver Projeto no GitHub", command=lambda: webbrowser.open_new(github_url))
         github_button.grid(row=0, column=0, padx=5, sticky="ew")
 
@@ -432,8 +440,8 @@ class ImageFXApp(ctk.CTk):
         center_x = int(screen_width / 2 - window_width / 2)
         center_y = int(screen_height / 2 - window_height / 2)
         license_win.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
-        license_win.resizable(False, False)
-        
+        license_win.minsize(window_width, window_height)
+        license_win.maxsize(window_width, window_height)
         license_win.transient(self)
         license_win.grab_set()
 
@@ -587,7 +595,7 @@ class ImageFXApp(ctk.CTk):
                 self.status_label.configure(text="Atualização disponível. Visite a página para baixar.")
             else:
                 # Se o usuário já tem a versão mais recente
-                CTkMessagebox(title="Tudo Certo!", message=f"Você já está com a versão mais recente ({local_version_str}).")
+                CTkMessagebox(title="PrismaFX - Atualizado !", message=f"Você já está com a versão mais recente do PrismaFX ({local_version_str}).")
                 self.status_label.configure(text="Pronto.")
 
         except requests.RequestException as e:
