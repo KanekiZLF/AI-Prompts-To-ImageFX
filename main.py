@@ -156,6 +156,8 @@ class ImageFXApp(ctk.CTk):
         atexit.register(self.cleanup)
         self.all_results = []
         self.current_page_index = 0
+        self.cancel_requested = False # "Bandeira" para sinalizar o cancelamento
+        self.image_display_frame = None
         self.image_display_frame = None # Frame que conterá as imagens
         self.grid_columnconfigure(0, weight=1, minsize=400)
         self.grid_columnconfigure(1, weight=2)
@@ -246,6 +248,7 @@ class ImageFXApp(ctk.CTk):
         self.seed_lock_checkbox = ctk.CTkCheckBox(options_frame, text="Travar Seed", variable=self.seed_lock_var, command=self.toggle_seed_lock)
         self.seed_lock_checkbox.grid(row=3, column=1, padx=10, pady=(0,10), sticky="w")
         self.generate_button = ctk.CTkButton(bottom_frame, text="Gerar Todas as Imagens", command=self.start_generation_sequence, height=40)
+        self.cancel_button = ctk.CTkButton(bottom_frame, text="Cancelar Geração", command=self.cancel_generation, height=40, fg_color="red", hover_color="#CC0000")
         self.generate_button.pack(fill="x", pady=5)
         secondary_buttons_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         secondary_buttons_frame.pack(fill="x", pady=5)
@@ -278,6 +281,13 @@ class ImageFXApp(ctk.CTk):
         self.bind_all("<Tab>", self._go_to_next_page_on_tab)
         self.bind_all("<Shift-Tab>", self._go_to_prev_page_on_shift_tab)
         self.toggle_seed_lock()
+    
+    def cancel_generation(self):
+        """Sinaliza para o processo de geração que um cancelamento foi solicitado."""
+        if not self.cancel_requested:
+            self.cancel_requested = True
+            self.status_label.configure(text="Cancelando... Aguardando o prompt atual terminar.")
+            self.cancel_button.configure(state="disabled", text="Aguarde...")
 
     def _center_window(self, window):
         """Centraliza uma janela (Toplevel) no meio da tela."""
@@ -642,20 +652,41 @@ class ImageFXApp(ctk.CTk):
     
     def run_generation_sequence(self, prompts, auth_token, regeneration_index=None):
         if regeneration_index is None: self.all_results = [[] for _ in prompts]
+
         auth_error_occurred = False
-        for i, prompt_text in enumerate(prompts):
-            current_index = regeneration_index if regeneration_index is not None else i
-            self.status_label.configure(text=f"A gerar Prompt {current_index + 1}...")
-            prompt_data = {"prompt": prompt_text, "ratio": self.ratio_var.get(), "count": self.count_var.get(), "auth_token": auth_token}
-            new_image_paths = self.generate_single_prompt(prompt_data, current_index)
-            if new_image_paths == 'AUTH_ERROR':
-                self.status_label.configure(text="Falha na autenticação. Geração cancelada.")
-                auth_error_occurred = True
-                break
-            self.after(0, self.update_ui_after_prompt, current_index, new_image_paths or [])
-        if not auth_error_occurred:
-            self.status_label.configure(text="Geração concluída!")
-        self.set_ui_state(generating=False)
+
+        try:
+            for i, prompt_text in enumerate(prompts):
+                # <<< VERIFICA ANTES DE CADA PROMPT SE O CANCELAMENTO FOI SOLICITADO >>>
+                if self.cancel_requested:
+                    self.status_label.configure(text="Geração cancelada pelo usuário.")
+                    break # Sai do loop
+
+                current_index = regeneration_index if regeneration_index is not None else i
+                self.status_label.configure(text=f"A gerar Prompt {current_index + 1} de {len(prompts)}...")
+                prompt_data = {"prompt": prompt_text, "ratio": self.ratio_var.get(), "count": self.count_var.get(), "auth_token": auth_token}
+
+                new_image_paths = self.generate_single_prompt(prompt_data, current_index)
+
+                if new_image_paths == 'AUTH_ERROR':
+                    self.status_label.configure(text="Falha na autenticação. Geração cancelada.")
+                    auth_error_occurred = True
+                    break
+
+                # Atualiza a UI após cada prompt, mas apenas se não foi cancelado
+                if not self.cancel_requested:
+                    self.after(0, self.update_ui_after_prompt, current_index, new_image_paths or [])
+
+            # Define a mensagem final se o loop terminar sem ser cancelado
+            if not self.cancel_requested and not auth_error_occurred:
+                self.status_label.configure(text="Geração concluída!")
+
+        finally:
+            # <<< ESTE BLOCO SEMPRE EXECUTA, GARANTINDO A LIMPEZA >>>
+            # Reseta a bandeira de cancelamento para a próxima vez
+            self.cancel_requested = False
+            # Reabilita a interface, não importa o que aconteceu
+            self.set_ui_state(generating=False)
 
     def update_ui_after_prompt(self, page_index, image_paths):
         self.all_results[page_index] = image_paths
@@ -794,21 +825,32 @@ class ImageFXApp(ctk.CTk):
             CTkMessagebox(title="PrismaFX - Erro ao Salvar", message=f"Erro: {e}", icon="cancel")
 
     def set_ui_state(self, generating: bool):
-        state = "disabled" if generating else "normal"
-        self.generate_button.configure(state=state)
-        self.auth_token_entry.configure(state=state)
-        self.prompt_count_menu.configure(state=state)
-        self.ratio_menu.configure(state=state)
-        self.count_menu.configure(state=state)
+        main_state = "disabled" if generating else "normal"
+
+        # Habilita/desabilita os widgets principais
+        self.auth_token_entry.configure(state=main_state)
+        self.prompt_count_menu.configure(state=main_state)
+        self.ratio_menu.configure(state=main_state)
+        self.count_menu.configure(state=main_state)
         for widget_dict in self.prompt_text_widgets:
-            widget_dict['textbox'].configure(state=state)
+            widget_dict['textbox'].configure(state=main_state)
+
+        # Troca a visibilidade dos botões Gerar/Cancelar
         if generating:
+            self.generate_button.pack_forget() # Esconde o botão Gerar
+            self.cancel_button.pack(fill="x", pady=5) # Mostra o botão Cancelar
+            self.cancel_button.configure(state="normal", text="Cancelar Geração")
             self.prev_button.configure(state="disabled")
             self.next_button.configure(state="disabled")
             self.save_button.configure(state="disabled")
             self.regenerate_current_button.configure(state="disabled")
         else:
-            if self.all_results: self.show_page(self.current_page_index)
+            self.cancel_button.pack_forget() # Esconde o botão Cancelar
+            self.generate_button.pack(fill="x", pady=5) # Mostra o botão Gerar
+            self.generate_button.configure(state=main_state)
+            # Reabilita botões de navegação se houver resultados
+            if self.all_results:
+                self.show_page(self.current_page_index)
 
     # Salva as configurações em um arquivo JSON
     def _load_config(self):
