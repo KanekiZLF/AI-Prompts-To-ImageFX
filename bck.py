@@ -9,18 +9,20 @@ import webbrowser
 import sys
 import json
 import base64
+import time
 from packaging import version
 from tkinter import filedialog
 from PIL import Image
 import threading
+import re
 from CTkMessagebox import CTkMessagebox
 
 # --- INFORMAÇÕES DO PROGRAMA ---
-__version__ = "2.0.0"
+__version__ = "2.3.0"
 # URL CORRETA para o arquivo de texto puro
 VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote/refs/heads/master/version.txt"
 UPDATE_URL = "https://github.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote"
-YOUTUBE_TUTORIAL_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_ID"
+YOUTUBE_TUTORIAL_URL = "https://youtu.be/f_NrxFAwhZ0"
 LICENSE_TEXT = """
 Licença de Uso e Termos de Serviço do PrismaFX
 Copyright (c) 2025 PrismaFX & Luiz F. R. Pimentel
@@ -232,15 +234,24 @@ class ImageFXApp(ctk.CTk):
         bottom_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
         prompt_options_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         prompt_options_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(prompt_options_frame, text="Quantidade de Prompts:").pack(side="left")
+        
+        ctk.CTkLabel(prompt_options_frame, text="Quantidade de Prompts:").pack(side="left", padx=(0,5))
+        
         self.prompt_count_var = ctk.StringVar(value="1")
+        # Aumentamos o range da combobox para 50
         self.prompt_count_menu = DynamicComboBox(prompt_options_frame, 
                                                  variable=self.prompt_count_var,
-                                                 values=[str(i) for i in range(1, 15)],
+                                                 values=[str(i) for i in range(1, 51)],
                                                  command=self.validate_and_update_prompts,
-                                                 fg_color=self._editable_fg_color)
-        self.prompt_count_menu.pack(side="left", padx=10)
+                                                 fg_color=self._editable_fg_color,
+                                                 width=80)
+        self.prompt_count_menu.pack(side="left", padx=5)
         self.prompt_count_menu.bind("<Return>", self.validate_and_update_prompts)
+
+        # Botão para carregar prompts de um arquivo de texto
+        self.load_button = ctk.CTkButton(prompt_options_frame, text="Carregar de TXT", command=self.load_prompts_from_txt, fg_color="#28A745", hover_color="#218838")
+        self.load_button.pack(side="left", padx=(10, 0))
+
         clipboard_buttons_frame = ctk.CTkFrame(bottom_frame)
         clipboard_buttons_frame.pack(fill="x", pady=5)
         clipboard_buttons_frame.grid_columnconfigure((0, 1), weight=1)
@@ -318,7 +329,69 @@ class ImageFXApp(ctk.CTk):
         self.bind_all("<Shift-Tab>", self._go_to_prev_page_on_shift_tab)
         self.toggle_seed_lock()
     
-    
+    # <<< SUBSTITUA O MÉTODO ANTIGO POR ESTE >>>
+    def load_prompts_from_txt(self):
+        """Abre uma janela para o usuário selecionar um arquivo .txt e carrega os prompts."""
+        
+        file_path = filedialog.askopenfilename(
+            title="PrismaFX - Selecione um arquivo de prompts (.txt)",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            prompts_list = []
+            current_prompt_lines = []
+
+            # Itera por todas as linhas do arquivo
+            for line in lines:
+                # Usa regex para encontrar o padrão "Prompt X –" de forma flexível
+                if re.match(r'^\s*Prompt \d+\s*–', line, re.IGNORECASE):
+                    # Se encontrarmos um novo prompt, salvamos o anterior que estávamos montando
+                    if current_prompt_lines:
+                        full_prompt = " ".join(current_prompt_lines).strip()
+                        prompts_list.append(full_prompt)
+                    current_prompt_lines = [] # Limpa para o novo prompt
+                else:
+                    # Se não for uma linha de título, é uma linha de conteúdo
+                    line_content = line.strip()
+                    if line_content: # Ignora linhas vazias
+                        current_prompt_lines.append(line_content)
+            
+            # Adiciona o último prompt que estava sendo montado
+            if current_prompt_lines:
+                full_prompt = " ".join(current_prompt_lines).strip()
+                prompts_list.append(full_prompt)
+
+            # --- Validação dos dados carregados ---
+            if not prompts_list:
+                CTkMessagebox(title="Erro de Formato", message="Nenhum prompt válido encontrado no arquivo.\nVerifique se o formato é 'Prompt 1 – ...'", icon="cancel")
+                return
+
+            num_prompts = len(prompts_list)
+
+            if num_prompts > 50:
+                prompts_list = prompts_list[:50]
+                num_prompts = 50
+                CTkMessagebox(title="Aviso", message="O arquivo continha mais de 50 prompts. Apenas os 50 primeiros foram carregados.", icon="warning")
+
+            # --- Atualiza o estado do programa ---
+            self.prompt_data_list = [""] * 50
+            for i, prompt in enumerate(prompts_list):
+                self.prompt_data_list[i] = prompt
+            
+            self.prompt_count_var.set(str(num_prompts))
+            self.validate_and_update_prompts()
+
+            CTkMessagebox(title="Sucesso", message=f"{num_prompts} prompts foram carregados com sucesso!")
+
+        except Exception as e:
+            CTkMessagebox(title="Erro Inesperado", message=f"Ocorreu um erro ao carregar o arquivo:\n{e}", icon="cancel")
 
     def cancel_generation(self):
         """Sinaliza para o processo de geração que um cancelamento foi solicitado."""
@@ -353,7 +426,16 @@ class ImageFXApp(ctk.CTk):
             self.clipboard_clear()
             self.clipboard_append(js_script)
             copy_button.configure(text="Copiado!")
-            self.after(2000, lambda: copy_button.configure(text="Copiar Código para o Console"))
+
+            # Função separada para resetar o texto, para maior clareza
+            def reset_button_text():
+                # A VERIFICAÇÃO ESSENCIAL ESTÁ AQUI:
+                # Só altera o botão se ele ainda existir na tela
+                if copy_button.winfo_exists():
+                    copy_button.configure(text="Copiar Código para o Console")
+
+            # Agenda a nova função de reset
+            self.after(2000, reset_button_text)
 
         ctk.CTkLabel(help_win, text="Passo a Passo para Obter o Token", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 15))
 
@@ -692,7 +774,7 @@ class ImageFXApp(ctk.CTk):
     def run_generation_sequence(self, prompts, auth_token, regeneration_index=None):
         if regeneration_index is None: self.all_results = [[] for _ in prompts]
         
-        auth_error_occurred = False
+        new_image_paths = None # Variável para checagem final
         
         try:
             for i, prompt_text in enumerate(prompts):
@@ -706,20 +788,28 @@ class ImageFXApp(ctk.CTk):
                 
                 new_image_paths = self.generate_single_prompt(prompt_data, current_index)
 
-                if new_image_paths == 'AUTH_ERROR':
-                    self.status_label.configure(text="Falha na autenticação. Geração cancelada.")
-                    auth_error_occurred = True
+                # Verifica os sinais de erro para interromper o loop
+                if new_image_paths in ['AUTH_ERROR', 'RATE_LIMIT_ERROR']:
+                    if new_image_paths == 'AUTH_ERROR':
+                        self.status_label.configure(text="Falha na autenticação. Geração interrompida.")
+                    elif new_image_paths == 'RATE_LIMIT_ERROR':
+                        self.status_label.configure(text="Geração interrompida devido ao limite de requisições.")
                     break
 
                 if not self.cancel_requested:
                     self.after(0, self.update_ui_after_prompt, current_index, new_image_paths or [])
+                
+                # Pausa para evitar o erro 429 (solução preventiva)
+                if i < len(prompts) - 1 and not self.cancel_requested:
+                    self.status_label.configure(text=f"Pausa de 2s para evitar sobrecarga...")
+                    time.sleep(2)
             
-            if not self.cancel_requested and not auth_error_occurred:
+            # Define a mensagem final se o loop terminar sem cancelamento ou erro
+            if not self.cancel_requested and new_image_paths not in ['AUTH_ERROR', 'RATE_LIMIT_ERROR']:
                 self.status_label.configure(text="Geração concluída!")
 
         finally:
             self.cancel_requested = False
-            # Chama a NOVA função para restaurar a UI corretamente
             self._update_ui_for_generation_end()
 
     def update_ui_after_prompt(self, page_index, image_paths):
@@ -732,27 +822,28 @@ class ImageFXApp(ctk.CTk):
             for path in self.all_results[current_index]:
                 try: os.remove(path)
                 except OSError: pass
+
         if not self.seed_lock_var.get():
             new_seed = random.randint(100000, 999999)
             self.seed_var.set(str(new_seed))
+
         current_seed = 0
         try:
             current_seed = int(self.seed_var.get())
         except (ValueError, TypeError):
             current_seed = random.randint(100000, 999999)
             self.seed_var.set(str(current_seed))
+
         ratio_map = {
             "Quadrado (1:1)": "IMAGE_ASPECT_RATIO_SQUARE",
             "Retrato (9:16)": "IMAGE_ASPECT_RATIO_PORTRAIT",
             "Paisagem (16:9)": "IMAGE_ASPECT_RATIO_LANDSCAPE"
         }
         api_ratio = ratio_map.get(prompt_data["ratio"], "IMAGE_ASPECT_RATIO_SQUARE")
+        
         api_model = "IMAGEN_3_5"
         api_url = "https://aisandbox-pa.googleapis.com/v1:runImageFx"
-        headers = {
-            "Authorization": f"Bearer {prompt_data['auth_token']}",
-            "Content-Type": "application/json",
-        }
+        
         payload = {
             "userInput": {
                 "candidatesCount": int(prompt_data["count"]),
@@ -763,28 +854,47 @@ class ImageFXApp(ctk.CTk):
             "modelInput": {"modelNameType": api_model},
             "clientContext": {"sessionId": f";{random.randint(1740000000000, 1799999999999)}", "tool": "IMAGE_FX"},
         }
+
         try:
+            # Adiciona cabeçalhos, incluindo o de autorização, para a requisição
+            headers = {
+                'User-Agent': 'PrismaFX/1.0',
+                "Authorization": f"Bearer {prompt_data['auth_token']}",
+                "Content-Type": "application/json",
+            }
             response = requests.post(api_url, headers=headers, json=payload, timeout=120)
             response.raise_for_status()
+
             response_data = response.json()
             generated_images_data = response_data.get("imagePanels", [{}])[0].get("generatedImages", [])
+            
             if not generated_images_data:
                 self.status_label.configure(text=f"Erro no prompt {current_index + 1}: Resposta vazia.")
                 return None
+            
             new_image_paths = []
             for i, img_data in enumerate(generated_images_data):
                 base64_string = img_data.get("encodedImage")
                 if base64_string:
                     image_bytes = base64.b64decode(base64_string)
-                    temp_file_path = os.path.join(self.temp_dir, f"prompt_{current_index}_{i}_{random.randint(1000, 9999)}.png")
+                    temp_file_path = os.path.join(self.temp_dir, f"PrismaFx_Prompt{current_index + 1}_Image{i + 1}.png")
                     with open(temp_file_path, "wb") as f:
                         f.write(image_bytes)
                     new_image_paths.append(temp_file_path)
             return new_image_paths
+
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                self.after(0, lambda: CTkMessagebox(title="PrismaFX - Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.\n\nPor favor, obtenha um novo token e cole-o no campo apropriado.", icon="cancel"))
+                self.after(0, lambda: CTkMessagebox(title="PrismaFX - Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou, verifique e tente novamente !", icon="cancel"))
                 return 'AUTH_ERROR'
+            
+            elif e.response.status_code == 429:
+                self.after(0, lambda: CTkMessagebox(
+                    title="PrismaFX - Muitas Requisições (Erro 429)", 
+                    message="Você enviou muitas solicitações em um curto período.\n\nA API do Google limitou temporariamente seu acesso.\n\nPor favor, aguarde alguns minutos antes de tentar novamente.", 
+                    icon="cancel"))
+                return 'RATE_LIMIT_ERROR'
+            
             else:
                 print(f"Erro HTTP ao gerar prompt: {e.response.status_code}\n{e.response.text}")
                 self.status_label.configure(text=f"Erro HTTP {e.response.status_code} no prompt {current_index + 1}...")

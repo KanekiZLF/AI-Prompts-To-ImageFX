@@ -22,7 +22,7 @@ __version__ = "2.3.0"
 # URL CORRETA para o arquivo de texto puro
 VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote/refs/heads/master/version.txt"
 UPDATE_URL = "https://github.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote"
-YOUTUBE_TUTORIAL_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_ID"
+YOUTUBE_TUTORIAL_URL = "https://youtu.be/f_NrxFAwhZ0"
 LICENSE_TEXT = """
 Licença de Uso e Termos de Serviço do PrismaFX
 Copyright (c) 2025 PrismaFX & Luiz F. R. Pimentel
@@ -877,7 +877,7 @@ class ImageFXApp(ctk.CTk):
                 base64_string = img_data.get("encodedImage")
                 if base64_string:
                     image_bytes = base64.b64decode(base64_string)
-                    temp_file_path = os.path.join(self.temp_dir, f"prompt_{current_index}_{i}_{random.randint(1000, 9999)}.png")
+                    temp_file_path = os.path.join(self.temp_dir, f"PrismaFx_Prompt{current_index + 1}_Image{i + 1}.png")
                     with open(temp_file_path, "wb") as f:
                         f.write(image_bytes)
                     new_image_paths.append(temp_file_path)
