@@ -67,6 +67,26 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+def get_config_path(filename="config.json"):
+    """
+    Obtém o caminho para um arquivo de configuração na pasta AppData do usuário.
+    Cria a pasta do aplicativo se ela não existir.
+    """
+    # Encontra a pasta AppData\Roaming, que é o local padrão para configs
+    app_data_path = os.getenv('APPDATA')
+    if app_data_path is None:
+        # Se não encontrar AppData (raro), usa a pasta home do usuário como alternativa
+        app_data_path = os.path.expanduser("~")
+
+    # Cria o caminho para a pasta específica do nosso app
+    app_folder = os.path.join(app_data_path, "PrismaFX")
+
+    # Cria a pasta se ela não existir
+    os.makedirs(app_folder, exist_ok=True)
+
+    # Retorna o caminho completo para o arquivo de configuração
+    return os.path.join(app_folder, filename)
+
 
 
 # --- CLASSE DYNAMIC COMBOBOX ---
@@ -235,10 +255,12 @@ class ImageFXApp(ctk.CTk):
         self.ratio_var = ctk.StringVar(value="Quadrado (1:1)")
         self.ratio_menu = DynamicComboBox(options_frame, variable=self.ratio_var, values=["Quadrado (1:1)", "Retrato (9:16)", "Paisagem (16:9)"], state="readonly")
         self.ratio_menu.grid(row=1, column=0, padx=10, pady=(0,10), sticky="ew")
+        self._ratio_menu_default_state = self.ratio_menu.cget("state")
         ctk.CTkLabel(options_frame, text="Imagens por Prompt").grid(row=0, column=1, padx=10, pady=(5,0), sticky="w")
         self.count_var = ctk.StringVar(value="1")
         self.count_menu = DynamicComboBox(options_frame, variable=self.count_var, values=["1", "2", "3", "4"], state="readonly")
         self.count_menu.grid(row=1, column=1, padx=10, pady=(0,10), sticky="ew")
+        self._count_menu_default_state = self.count_menu.cget("state")
         ctk.CTkLabel(options_frame, text="Seed").grid(row=2, column=0, padx=10, pady=(5,0), sticky="w")
         self.seed_var = ctk.StringVar()
         self.seed_entry = ctk.CTkEntry(options_frame, textvariable=self.seed_var, 
@@ -247,9 +269,23 @@ class ImageFXApp(ctk.CTk):
         self.seed_lock_var = ctk.BooleanVar(value=False)
         self.seed_lock_checkbox = ctk.CTkCheckBox(options_frame, text="Travar Seed", variable=self.seed_lock_var, command=self.toggle_seed_lock)
         self.seed_lock_checkbox.grid(row=3, column=1, padx=10, pady=(0,10), sticky="w")
-        self.generate_button = ctk.CTkButton(bottom_frame, text="Gerar Todas as Imagens", command=self.start_generation_sequence, height=40)
-        self.cancel_button = ctk.CTkButton(bottom_frame, text="Cancelar Geração", command=self.cancel_generation, height=40, fg_color="red", hover_color="#CC0000")
-        self.generate_button.pack(fill="x", pady=5)
+        
+        # 1. Criamos o frame container
+        self.action_button_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
+        self.action_button_frame.pack(fill="x", pady=5)
+        self.action_button_frame.grid_columnconfigure(0, weight=1)
+
+        # 2. Criamos os dois botões, com o mesmo frame como pai
+        self.generate_button = ctk.CTkButton(self.action_button_frame, text="Gerar Todas as Imagens", command=self.start_generation_sequence, height=40)
+        self.cancel_button = ctk.CTkButton(self.action_button_frame, text="Cancelar Geração", command=self.cancel_generation, height=40, fg_color="red", hover_color="#CC0000")
+
+        # 3. Posicionamos AMBOS na mesma célula do grid (row=0, column=0)
+        self.generate_button.grid(row=0, column=0, sticky="ew")
+        self.cancel_button.grid(row=0, column=0, sticky="ew")
+
+        # 4. Trazemos o botão "Gerar" para a FRENTE por padrão
+        self.generate_button.lift()
+
         secondary_buttons_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         secondary_buttons_frame.pack(fill="x", pady=5)
         secondary_buttons_frame.grid_columnconfigure((0,1), weight=1)
@@ -282,6 +318,8 @@ class ImageFXApp(ctk.CTk):
         self.bind_all("<Shift-Tab>", self._go_to_prev_page_on_shift_tab)
         self.toggle_seed_lock()
     
+    
+
     def cancel_generation(self):
         """Sinaliza para o processo de geração que um cancelamento foi solicitado."""
         if not self.cancel_requested:
@@ -650,22 +688,22 @@ class ImageFXApp(ctk.CTk):
     def start_regenerate_current(self):
         self.start_generation_sequence(regeneration_index=self.current_page_index)
     
+    # <<< MÉTODO ATUALIZADO >>>
     def run_generation_sequence(self, prompts, auth_token, regeneration_index=None):
         if regeneration_index is None: self.all_results = [[] for _ in prompts]
-
+        
         auth_error_occurred = False
-
+        
         try:
             for i, prompt_text in enumerate(prompts):
-                # <<< VERIFICA ANTES DE CADA PROMPT SE O CANCELAMENTO FOI SOLICITADO >>>
                 if self.cancel_requested:
                     self.status_label.configure(text="Geração cancelada pelo usuário.")
-                    break # Sai do loop
+                    break
 
                 current_index = regeneration_index if regeneration_index is not None else i
                 self.status_label.configure(text=f"A gerar Prompt {current_index + 1} de {len(prompts)}...")
                 prompt_data = {"prompt": prompt_text, "ratio": self.ratio_var.get(), "count": self.count_var.get(), "auth_token": auth_token}
-
+                
                 new_image_paths = self.generate_single_prompt(prompt_data, current_index)
 
                 if new_image_paths == 'AUTH_ERROR':
@@ -673,20 +711,16 @@ class ImageFXApp(ctk.CTk):
                     auth_error_occurred = True
                     break
 
-                # Atualiza a UI após cada prompt, mas apenas se não foi cancelado
                 if not self.cancel_requested:
                     self.after(0, self.update_ui_after_prompt, current_index, new_image_paths or [])
-
-            # Define a mensagem final se o loop terminar sem ser cancelado
+            
             if not self.cancel_requested and not auth_error_occurred:
                 self.status_label.configure(text="Geração concluída!")
 
         finally:
-            # <<< ESTE BLOCO SEMPRE EXECUTA, GARANTINDO A LIMPEZA >>>
-            # Reseta a bandeira de cancelamento para a próxima vez
             self.cancel_requested = False
-            # Reabilita a interface, não importa o que aconteceu
-            self.set_ui_state(generating=False)
+            # Chama a NOVA função para restaurar a UI corretamente
+            self._update_ui_for_generation_end()
 
     def update_ui_after_prompt(self, page_index, image_paths):
         self.all_results[page_index] = image_paths
@@ -824,73 +858,93 @@ class ImageFXApp(ctk.CTk):
         except Exception as e:
             CTkMessagebox(title="PrismaFX - Erro ao Salvar", message=f"Erro: {e}", icon="cancel")
 
-    def set_ui_state(self, generating: bool):
-        main_state = "disabled" if generating else "normal"
-
-        # Habilita/desabilita os widgets principais
-        self.auth_token_entry.configure(state=main_state)
-        self.prompt_count_menu.configure(state=main_state)
-        self.ratio_menu.configure(state=main_state)
-        self.count_menu.configure(state=main_state)
+    # <<< NOVO MÉTODO >>>
+    def _update_ui_for_generation_end(self):
+        """Restaura a interface ao estado correto após a geração terminar ou ser cancelada."""
+        # Restaura o estado dos widgets de entrada
+        self.auth_token_entry.configure(state="normal")
+        self.prompt_count_menu.configure(state="normal") # Este é editável
+        
+        # Restaura o estado original dos menus 'readonly'
+        self.ratio_menu.configure(state=self._ratio_menu_default_state)
+        self.count_menu.configure(state=self._count_menu_default_state)
+        
         for widget_dict in self.prompt_text_widgets:
-            widget_dict['textbox'].configure(state=main_state)
+            widget_dict['textbox'].configure(state="normal")
 
-        # Troca a visibilidade dos botões Gerar/Cancelar
-        if generating:
-            self.generate_button.pack_forget() # Esconde o botão Gerar
-            self.cancel_button.pack(fill="x", pady=5) # Mostra o botão Cancelar
-            self.cancel_button.configure(state="normal", text="Cancelar Geração")
-            self.prev_button.configure(state="disabled")
-            self.next_button.configure(state="disabled")
-            self.save_button.configure(state="disabled")
-            self.regenerate_current_button.configure(state="disabled")
-        else:
-            self.cancel_button.pack_forget() # Esconde o botão Cancelar
-            self.generate_button.pack(fill="x", pady=5) # Mostra o botão Gerar
-            self.generate_button.configure(state=main_state)
-            # Reabilita botões de navegação se houver resultados
-            if self.all_results:
-                self.show_page(self.current_page_index)
+        # Alterna de volta para o botão "Gerar"
+        self.cancel_button.grid_forget()
+        self.generate_button.grid(row=0, column=0, sticky="ew")
+        self.generate_button.configure(state="normal")
+        
+        # Reabilita botões de navegação e salvamento se houver resultados
+        if self.all_results:
+            self.show_page(self.current_page_index)
+
+    # <<< MÉTODO ATUALIZADO >>>
+    def set_ui_state(self, generating: bool):
+        """Gerencia a UI APENAS para o início da geração, desabilitando os controles."""
+        if not generating:
+            # Esta função não deve mais ser usada para reabilitar a UI.
+            # A nova função _update_ui_for_generation_end() fará isso.
+            return
+
+        state = "disabled"
+        
+        # Desabilita todos os controles
+        self.auth_token_entry.configure(state=state)
+        self.prompt_count_menu.configure(state=state)
+        self.ratio_menu.configure(state=state)
+        self.count_menu.configure(state=state)
+        for widget_dict in self.prompt_text_widgets:
+            widget_dict['textbox'].configure(state=state)
+
+        # Alterna a visibilidade dos botões Gerar/Cancelar
+        self.generate_button.grid_forget()
+        self.cancel_button.grid(row=0, column=0, sticky="ew")
+        self.cancel_button.configure(state="normal", text="Cancelar Geração")
+        
+        # Desabilita botões de navegação
+        self.prev_button.configure(state=state)
+        self.next_button.configure(state=state)
+        self.save_button.configure(state=state)
+        self.regenerate_current_button.configure(state=state)
 
     # Salva as configurações em um arquivo JSON
     def _load_config(self):
-            """
-            Carrega as configurações de um arquivo JSON de forma robusta.
-            Valida os tipos e valores, e recria o arquivo se estiver corrompido.
-            """
-            default_config = {
-                "header": "ARQUIVO DE CONFIGURACAO DO GERADOR IMAGEFX - NAO EDITE MANUALMENTE",
-                "execution_count": 0,
-            }
+        """Carrega as configurações de um arquivo JSON de forma robusta."""
+        default_config = {
+            "header": "ARQUIVO DE CONFIGURACAO DO PRISMAFX - NAO EDITE MANUALMENTE",
+            "execution_count": 0,
+        }
+        
+        # <<< ALTERADO: Usa a nova função para encontrar o arquivo de config >>>
+        config_file_path = get_config_path()
 
-            try:
-                with open(resource_path("config.json"), "r") as f:
-                    loaded_config = json.load(f)
-                
-                # Se o arquivo foi lido, agora validamos os dados
-                sanitized_config = default_config.copy()
+        try:
+            with open(config_file_path, "r") as f:
+                loaded_config = json.load(f)
+            
+            sanitized_config = default_config.copy()
+            count = loaded_config.get("execution_count")
+            if isinstance(count, int) and count >= 0:
+                sanitized_config["execution_count"] = count
+            
+            donated = loaded_config.get("user_has_donated")
+            if isinstance(donated, bool):
+                sanitized_config["user_has_donated"] = donated
 
-                # Valida 'execution_count'
-                count = loaded_config.get("execution_count")
-                if isinstance(count, int) and count >= 0:
-                    sanitized_config["execution_count"] = count
-                
-                # Valida 'user_has_donated'
-                donated = loaded_config.get("user_has_donated")
-                if isinstance(donated, bool):
-                    sanitized_config["user_has_donated"] = donated
+            return sanitized_config
 
-                return sanitized_config
-
-            except (FileNotFoundError, json.JSONDecodeError, TypeError):
-                # Se o arquivo não existe, é JSON inválido ou os dados estão errados,
-                # retorna a configuração padrão. O arquivo será recriado ao salvar.
-                return default_config
-
+        except (FileNotFoundError, json.JSONDecodeError, TypeError):
+            return default_config
+        
     def _save_config(self):
-        """Salva as configurações atuais em um arquivo JSON."""
-        with open(resource_path("config.json"), "w") as f:
-            json.dump(self.config, f, indent=4)
+            """Salva as configurações atuais em um arquivo JSON."""
+            # <<< ALTERADO: Usa a nova função para encontrar o arquivo de config >>>
+            config_file_path = get_config_path()
+            with open(config_file_path, "w") as f:
+                json.dump(self.config, f, indent=4)
 
 if __name__ == "__main__":
     app = ImageFXApp()

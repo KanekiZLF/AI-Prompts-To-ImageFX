@@ -13,10 +13,11 @@ from packaging import version
 from tkinter import filedialog
 from PIL import Image
 import threading
+import re
 from CTkMessagebox import CTkMessagebox
 
 # --- INFORMAÇÕES DO PROGRAMA ---
-__version__ = "2.0.0"
+__version__ = "2.3.0"
 # URL CORRETA para o arquivo de texto puro
 VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote/refs/heads/master/version.txt"
 UPDATE_URL = "https://github.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote"
@@ -66,6 +67,26 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
+def get_config_path(filename="config.json"):
+    """
+    Obtém o caminho para um arquivo de configuração na pasta AppData do usuário.
+    Cria a pasta do aplicativo se ela não existir.
+    """
+    # Encontra a pasta AppData\Roaming, que é o local padrão para configs
+    app_data_path = os.getenv('APPDATA')
+    if app_data_path is None:
+        # Se não encontrar AppData (raro), usa a pasta home do usuário como alternativa
+        app_data_path = os.path.expanduser("~")
+
+    # Cria o caminho para a pasta específica do nosso app
+    app_folder = os.path.join(app_data_path, "PrismaFX")
+
+    # Cria a pasta se ela não existir
+    os.makedirs(app_folder, exist_ok=True)
+
+    # Retorna o caminho completo para o arquivo de configuração
+    return os.path.join(app_folder, filename)
 
 
 
@@ -212,15 +233,24 @@ class ImageFXApp(ctk.CTk):
         bottom_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
         prompt_options_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         prompt_options_frame.pack(fill="x", pady=5)
-        ctk.CTkLabel(prompt_options_frame, text="Quantidade de Prompts:").pack(side="left")
+        
+        ctk.CTkLabel(prompt_options_frame, text="Quantidade de Prompts:").pack(side="left", padx=(0,5))
+        
         self.prompt_count_var = ctk.StringVar(value="1")
+        # Aumentamos o range da combobox para 50
         self.prompt_count_menu = DynamicComboBox(prompt_options_frame, 
                                                  variable=self.prompt_count_var,
-                                                 values=[str(i) for i in range(1, 15)],
+                                                 values=[str(i) for i in range(1, 51)],
                                                  command=self.validate_and_update_prompts,
-                                                 fg_color=self._editable_fg_color)
-        self.prompt_count_menu.pack(side="left", padx=10)
+                                                 fg_color=self._editable_fg_color,
+                                                 width=80)
+        self.prompt_count_menu.pack(side="left", padx=5)
         self.prompt_count_menu.bind("<Return>", self.validate_and_update_prompts)
+
+        # Botão para carregar prompts de um arquivo de texto
+        self.load_button = ctk.CTkButton(prompt_options_frame, text="Carregar de TXT", command=self.load_prompts_from_txt, fg_color="#28A745", hover_color="#218838")
+        self.load_button.pack(side="left", padx=(10, 0))
+
         clipboard_buttons_frame = ctk.CTkFrame(bottom_frame)
         clipboard_buttons_frame.pack(fill="x", pady=5)
         clipboard_buttons_frame.grid_columnconfigure((0, 1), weight=1)
@@ -298,6 +328,70 @@ class ImageFXApp(ctk.CTk):
         self.bind_all("<Shift-Tab>", self._go_to_prev_page_on_shift_tab)
         self.toggle_seed_lock()
     
+    # <<< SUBSTITUA O MÉTODO ANTIGO POR ESTE >>>
+    def load_prompts_from_txt(self):
+        """Abre uma janela para o usuário selecionar um arquivo .txt e carrega os prompts."""
+        
+        file_path = filedialog.askopenfilename(
+            title="PrismaFX - Selecione um arquivo de prompts (.txt)",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            prompts_list = []
+            current_prompt_lines = []
+
+            # Itera por todas as linhas do arquivo
+            for line in lines:
+                # Usa regex para encontrar o padrão "Prompt X –" de forma flexível
+                if re.match(r'^\s*Prompt \d+\s*–', line, re.IGNORECASE):
+                    # Se encontrarmos um novo prompt, salvamos o anterior que estávamos montando
+                    if current_prompt_lines:
+                        full_prompt = " ".join(current_prompt_lines).strip()
+                        prompts_list.append(full_prompt)
+                    current_prompt_lines = [] # Limpa para o novo prompt
+                else:
+                    # Se não for uma linha de título, é uma linha de conteúdo
+                    line_content = line.strip()
+                    if line_content: # Ignora linhas vazias
+                        current_prompt_lines.append(line_content)
+            
+            # Adiciona o último prompt que estava sendo montado
+            if current_prompt_lines:
+                full_prompt = " ".join(current_prompt_lines).strip()
+                prompts_list.append(full_prompt)
+
+            # --- Validação dos dados carregados ---
+            if not prompts_list:
+                CTkMessagebox(title="Erro de Formato", message="Nenhum prompt válido encontrado no arquivo.\nVerifique se o formato é 'Prompt 1 – ...'", icon="cancel")
+                return
+
+            num_prompts = len(prompts_list)
+
+            if num_prompts > 50:
+                prompts_list = prompts_list[:50]
+                num_prompts = 50
+                CTkMessagebox(title="Aviso", message="O arquivo continha mais de 50 prompts. Apenas os 50 primeiros foram carregados.", icon="warning")
+
+            # --- Atualiza o estado do programa ---
+            self.prompt_data_list = [""] * 50
+            for i, prompt in enumerate(prompts_list):
+                self.prompt_data_list[i] = prompt
+            
+            self.prompt_count_var.set(str(num_prompts))
+            self.validate_and_update_prompts()
+
+            CTkMessagebox(title="Sucesso", message=f"{num_prompts} prompts foram carregados com sucesso!")
+
+        except Exception as e:
+            CTkMessagebox(title="Erro Inesperado", message=f"Ocorreu um erro ao carregar o arquivo:\n{e}", icon="cancel")
+
     def cancel_generation(self):
         """Sinaliza para o processo de geração que um cancelamento foi solicitado."""
         if not self.cancel_requested:
@@ -890,43 +984,39 @@ class ImageFXApp(ctk.CTk):
 
     # Salva as configurações em um arquivo JSON
     def _load_config(self):
-            """
-            Carrega as configurações de um arquivo JSON de forma robusta.
-            Valida os tipos e valores, e recria o arquivo se estiver corrompido.
-            """
-            default_config = {
-                "header": "ARQUIVO DE CONFIGURACAO DO GERADOR IMAGEFX - NAO EDITE MANUALMENTE",
-                "execution_count": 0,
-            }
+        """Carrega as configurações de um arquivo JSON de forma robusta."""
+        default_config = {
+            "header": "ARQUIVO DE CONFIGURACAO DO PRISMAFX - NAO EDITE MANUALMENTE",
+            "execution_count": 0,
+        }
+        
+        # <<< ALTERADO: Usa a nova função para encontrar o arquivo de config >>>
+        config_file_path = get_config_path()
 
-            try:
-                with open(resource_path("config.json"), "r") as f:
-                    loaded_config = json.load(f)
-                
-                # Se o arquivo foi lido, agora validamos os dados
-                sanitized_config = default_config.copy()
+        try:
+            with open(config_file_path, "r") as f:
+                loaded_config = json.load(f)
+            
+            sanitized_config = default_config.copy()
+            count = loaded_config.get("execution_count")
+            if isinstance(count, int) and count >= 0:
+                sanitized_config["execution_count"] = count
+            
+            donated = loaded_config.get("user_has_donated")
+            if isinstance(donated, bool):
+                sanitized_config["user_has_donated"] = donated
 
-                # Valida 'execution_count'
-                count = loaded_config.get("execution_count")
-                if isinstance(count, int) and count >= 0:
-                    sanitized_config["execution_count"] = count
-                
-                # Valida 'user_has_donated'
-                donated = loaded_config.get("user_has_donated")
-                if isinstance(donated, bool):
-                    sanitized_config["user_has_donated"] = donated
+            return sanitized_config
 
-                return sanitized_config
-
-            except (FileNotFoundError, json.JSONDecodeError, TypeError):
-                # Se o arquivo não existe, é JSON inválido ou os dados estão errados,
-                # retorna a configuração padrão. O arquivo será recriado ao salvar.
-                return default_config
-
+        except (FileNotFoundError, json.JSONDecodeError, TypeError):
+            return default_config
+        
     def _save_config(self):
-        """Salva as configurações atuais em um arquivo JSON."""
-        with open(resource_path("config.json"), "w") as f:
-            json.dump(self.config, f, indent=4)
+            """Salva as configurações atuais em um arquivo JSON."""
+            # <<< ALTERADO: Usa a nova função para encontrar o arquivo de config >>>
+            config_file_path = get_config_path()
+            with open(config_file_path, "w") as f:
+                json.dump(self.config, f, indent=4)
 
 if __name__ == "__main__":
     app = ImageFXApp()

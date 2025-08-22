@@ -3,8 +3,8 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
     # Versão do arquivo: (MAJOR, MINOR, PATCH, BUILD)
-    filevers=(2, 0, 0, 0),
-    prodvers=(2, 0, 0, 0),
+    filevers=(2, 3, 0, 0),
+    prodvers=(2, 3, 0, 0),
     # Máscaras e flags padrão, não precisam ser alteradas.
     mask=0x3f,
     flags=0x0,
@@ -21,12 +21,12 @@ VSVersionInfo(
         u'041604b0',
         [StringStruct(u'CompanyName', u'Luiz F. R. Pimentel'),
         StringStruct(u'FileDescription', u'Gerador de imagens em lote utilizando a API do ImageFX.'),
-        StringStruct(u'FileVersion', u'2.0.0'),
+        StringStruct(u'FileVersion', u'2.3.0'),
         StringStruct(u'InternalName', u'PrismaFX'),
         StringStruct(u'LegalCopyright', u'Copyright © 2025 Luiz F. R. Pimentel. Todos os direitos reservados.'),
         StringStruct(u'OriginalFilename', u'PrismaFX.exe'),
         StringStruct(u'ProductName', u'PrismaFX'),
-        StringStruct(u'ProductVersion', u'2.0.0')])
+        StringStruct(u'ProductVersion', u'2.3.0')])
       ]), 
     VarFileInfo([VarStruct(u'Translation', [1046, 1200])])
   ]
