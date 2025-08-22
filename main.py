@@ -9,6 +9,7 @@ import webbrowser
 import sys
 import json
 import base64
+import time
 from packaging import version
 from tkinter import filedialog
 from PIL import Image
@@ -425,7 +426,16 @@ class ImageFXApp(ctk.CTk):
             self.clipboard_clear()
             self.clipboard_append(js_script)
             copy_button.configure(text="Copiado!")
-            self.after(2000, lambda: copy_button.configure(text="Copiar Código para o Console"))
+
+            # Função separada para resetar o texto, para maior clareza
+            def reset_button_text():
+                # A VERIFICAÇÃO ESSENCIAL ESTÁ AQUI:
+                # Só altera o botão se ele ainda existir na tela
+                if copy_button.winfo_exists():
+                    copy_button.configure(text="Copiar Código para o Console")
+
+            # Agenda a nova função de reset
+            self.after(2000, reset_button_text)
 
         ctk.CTkLabel(help_win, text="Passo a Passo para Obter o Token", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 15))
 
@@ -764,7 +774,7 @@ class ImageFXApp(ctk.CTk):
     def run_generation_sequence(self, prompts, auth_token, regeneration_index=None):
         if regeneration_index is None: self.all_results = [[] for _ in prompts]
         
-        auth_error_occurred = False
+        new_image_paths = None # Variável para checagem final
         
         try:
             for i, prompt_text in enumerate(prompts):
@@ -778,20 +788,28 @@ class ImageFXApp(ctk.CTk):
                 
                 new_image_paths = self.generate_single_prompt(prompt_data, current_index)
 
-                if new_image_paths == 'AUTH_ERROR':
-                    self.status_label.configure(text="Falha na autenticação. Geração cancelada.")
-                    auth_error_occurred = True
+                # Verifica os sinais de erro para interromper o loop
+                if new_image_paths in ['AUTH_ERROR', 'RATE_LIMIT_ERROR']:
+                    if new_image_paths == 'AUTH_ERROR':
+                        self.status_label.configure(text="Falha na autenticação. Geração interrompida.")
+                    elif new_image_paths == 'RATE_LIMIT_ERROR':
+                        self.status_label.configure(text="Geração interrompida devido ao limite de requisições.")
                     break
 
                 if not self.cancel_requested:
                     self.after(0, self.update_ui_after_prompt, current_index, new_image_paths or [])
+                
+                # Pausa para evitar o erro 429 (solução preventiva)
+                if i < len(prompts) - 1 and not self.cancel_requested:
+                    self.status_label.configure(text=f"Pausa de 2s para evitar sobrecarga...")
+                    time.sleep(2)
             
-            if not self.cancel_requested and not auth_error_occurred:
+            # Define a mensagem final se o loop terminar sem cancelamento ou erro
+            if not self.cancel_requested and new_image_paths not in ['AUTH_ERROR', 'RATE_LIMIT_ERROR']:
                 self.status_label.configure(text="Geração concluída!")
 
         finally:
             self.cancel_requested = False
-            # Chama a NOVA função para restaurar a UI corretamente
             self._update_ui_for_generation_end()
 
     def update_ui_after_prompt(self, page_index, image_paths):
@@ -804,27 +822,28 @@ class ImageFXApp(ctk.CTk):
             for path in self.all_results[current_index]:
                 try: os.remove(path)
                 except OSError: pass
+
         if not self.seed_lock_var.get():
             new_seed = random.randint(100000, 999999)
             self.seed_var.set(str(new_seed))
+
         current_seed = 0
         try:
             current_seed = int(self.seed_var.get())
         except (ValueError, TypeError):
             current_seed = random.randint(100000, 999999)
             self.seed_var.set(str(current_seed))
+
         ratio_map = {
             "Quadrado (1:1)": "IMAGE_ASPECT_RATIO_SQUARE",
             "Retrato (9:16)": "IMAGE_ASPECT_RATIO_PORTRAIT",
             "Paisagem (16:9)": "IMAGE_ASPECT_RATIO_LANDSCAPE"
         }
         api_ratio = ratio_map.get(prompt_data["ratio"], "IMAGE_ASPECT_RATIO_SQUARE")
+        
         api_model = "IMAGEN_3_5"
         api_url = "https://aisandbox-pa.googleapis.com/v1:runImageFx"
-        headers = {
-            "Authorization": f"Bearer {prompt_data['auth_token']}",
-            "Content-Type": "application/json",
-        }
+        
         payload = {
             "userInput": {
                 "candidatesCount": int(prompt_data["count"]),
@@ -835,14 +854,24 @@ class ImageFXApp(ctk.CTk):
             "modelInput": {"modelNameType": api_model},
             "clientContext": {"sessionId": f";{random.randint(1740000000000, 1799999999999)}", "tool": "IMAGE_FX"},
         }
+
         try:
+            # Adiciona cabeçalhos, incluindo o de autorização, para a requisição
+            headers = {
+                'User-Agent': 'PrismaFX/1.0',
+                "Authorization": f"Bearer {prompt_data['auth_token']}",
+                "Content-Type": "application/json",
+            }
             response = requests.post(api_url, headers=headers, json=payload, timeout=120)
             response.raise_for_status()
+
             response_data = response.json()
             generated_images_data = response_data.get("imagePanels", [{}])[0].get("generatedImages", [])
+            
             if not generated_images_data:
                 self.status_label.configure(text=f"Erro no prompt {current_index + 1}: Resposta vazia.")
                 return None
+            
             new_image_paths = []
             for i, img_data in enumerate(generated_images_data):
                 base64_string = img_data.get("encodedImage")
@@ -853,10 +882,19 @@ class ImageFXApp(ctk.CTk):
                         f.write(image_bytes)
                     new_image_paths.append(temp_file_path)
             return new_image_paths
+
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                self.after(0, lambda: CTkMessagebox(title="PrismaFX - Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.\n\nPor favor, obtenha um novo token e cole-o no campo apropriado.", icon="cancel"))
+                self.after(0, lambda: CTkMessagebox(title="Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.", icon="cancel"))
                 return 'AUTH_ERROR'
+            
+            elif e.response.status_code == 429:
+                self.after(0, lambda: CTkMessagebox(
+                    title="Muitas Requisições (Erro 429)", 
+                    message="Você enviou muitas solicitações em um curto período.\n\nA API do Google limitou temporariamente seu acesso.\n\nPor favor, aguarde alguns minutos antes de tentar novamente.", 
+                    icon="cancel"))
+                return 'RATE_LIMIT_ERROR'
+            
             else:
                 print(f"Erro HTTP ao gerar prompt: {e.response.status_code}\n{e.response.text}")
                 self.status_label.configure(text=f"Erro HTTP {e.response.status_code} no prompt {current_index + 1}...")
