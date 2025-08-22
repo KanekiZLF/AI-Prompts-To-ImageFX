@@ -885,12 +885,12 @@ class ImageFXApp(ctk.CTk):
 
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                self.after(0, lambda: CTkMessagebox(title="Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou.", icon="cancel"))
+                self.after(0, lambda: CTkMessagebox(title="PrismaFX - Erro de Autenticação (401)", message="Seu token de autenticação é inválido ou expirou, verifique e tente novamente !", icon="cancel"))
                 return 'AUTH_ERROR'
             
             elif e.response.status_code == 429:
                 self.after(0, lambda: CTkMessagebox(
-                    title="Muitas Requisições (Erro 429)", 
+                    title="PrismaFX - Muitas Requisições (Erro 429)", 
                     message="Você enviou muitas solicitações em um curto período.\n\nA API do Google limitou temporariamente seu acesso.\n\nPor favor, aguarde alguns minutos antes de tentar novamente.", 
                     icon="cancel"))
                 return 'RATE_LIMIT_ERROR'
