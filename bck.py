@@ -19,7 +19,7 @@ from CTkMessagebox import CTkMessagebox
 
 # --- INFORMAÇÕES DO PROGRAMA ---
 # Versão do programa
-__version__ = "2.3.0"
+__version__ = "2.3.3"
 # URL da versão online
 VERSION_URL = "https://raw.githubusercontent.com/KanekiZLF/PrismaFX---Gerador-ImageFX-em-Lote/refs/heads/master/version.txt"
 # URL de download
@@ -144,7 +144,7 @@ class ImageFXApp(ctk.CTk):
 
         self.prompts_per_page = 1
         self.current_prompt_page = 0
-        self.prompt_data_list = [""] * 50
+        self.prompt_data_list = [("", "")] * 50
         self.prompt_text_widgets = []
         self.temp_dir = tempfile.mkdtemp(prefix="imagefx_app_")
         atexit.register(self.cleanup)
@@ -183,6 +183,11 @@ class ImageFXApp(ctk.CTk):
         auth_frame.grid_columnconfigure(1, weight=0)
         self.auth_token_entry = ctk.CTkEntry(auth_frame, placeholder_text="Cole o seu token aqui", fg_color=self._editable_fg_color)
         self.auth_token_entry.grid(row=0, column=0, sticky="ew")
+        
+        saved_token = self.config.get("auth_token")
+        if saved_token:
+            self.auth_token_entry.insert(0, saved_token)
+            
         self.token_help_button = ctk.CTkButton(auth_frame, text="?", width=30, command=self.show_token_help)
         self.token_help_button.grid(row=0, column=1, padx=(5, 0))
         self._default_border_color = self.auth_token_entry.cget("border_color")
@@ -310,24 +315,48 @@ class ImageFXApp(ctk.CTk):
 
             prompts_list = []
             current_prompt_lines = []
-
+            current_prompt_title = ""
+            
+            # Padrão de regex para capturar "Prompt X – [TÍTULO]"
+            # O (.*) captura tudo que vier depois do último espaço após o traço.
+            separator_pattern = re.compile(r'^\s*Prompt\s*\d+\s*[–—-]\s*(.+)$', re.IGNORECASE)
+            
             for line in lines:
-                if re.match(r'^\s*Prompt \d+\s*–', line, re.IGNORECASE):
+                match = separator_pattern.match(line)
+                
+                if match:
+                    # Se encontrarmos um novo marcador de prompt, salvamos o prompt anterior
                     if current_prompt_lines:
-                        full_prompt = " ".join(current_prompt_lines).strip()
-                        prompts_list.append(full_prompt)
+                        full_prompt_text = " ".join(current_prompt_lines).strip()
+                        if full_prompt_text:
+                            prompts_list.append((full_prompt_text, current_prompt_title.strip()))
+                    
+                    # 1. Iniciamos o bloco do novo prompt e o título
                     current_prompt_lines = []
+                    
+                    # 2. Captura o título (raw_title) e remove espaços nas extremidades
+                    raw_title = match.group(1).strip()
+                    
+                    # 3. VERIFICAÇÃO DE SEGURANÇA FINAL: Remove o traço/hífen e qualquer espaço subsequente
+                    # usando re.sub para maior robustez
+                    raw_title = re.sub(r'^[\s–—-]+', '', raw_title).strip()
+                    
+                    current_prompt_title = raw_title
+                    
                 else:
+                    # Linhas de continuação, adiciona ao conteúdo do prompt
                     line_content = line.strip()
                     if line_content:
                         current_prompt_lines.append(line_content)
             
+            # Garante que o último prompt seja salvo
             if current_prompt_lines:
-                full_prompt = " ".join(current_prompt_lines).strip()
-                prompts_list.append(full_prompt)
+                full_prompt_text = " ".join(current_prompt_lines).strip()
+                if full_prompt_text:
+                    prompts_list.append((full_prompt_text, current_prompt_title.strip()))
 
             if not prompts_list:
-                CTkMessagebox(title="Erro de Formato", message="Nenhum prompt válido encontrado no arquivo.\nVerifique se o formato é 'Prompt 1 – ...'", icon="cancel")
+                CTkMessagebox(title="Erro de Formato", message="Nenhum prompt válido encontrado no arquivo.\nVerifique se o formato é 'Prompt N – [Título do Prompt]' seguido do texto.", icon="cancel")
                 return
 
             num_prompts = len(prompts_list)
@@ -336,9 +365,9 @@ class ImageFXApp(ctk.CTk):
                 num_prompts = 50
                 CTkMessagebox(title="Aviso", message="O arquivo continha mais de 50 prompts. Apenas os 50 primeiros foram carregados.", icon="warning")
 
-            self.prompt_data_list = [""] * 50
-            for i, prompt in enumerate(prompts_list):
-                self.prompt_data_list[i] = prompt
+            self.prompt_data_list = [("", "")] * 50
+            for i, prompt_tuple in enumerate(prompts_list):
+                self.prompt_data_list[i] = prompt_tuple
             
             self.prompt_count_var.set(str(num_prompts))
             self.validate_and_update_prompts()
@@ -346,8 +375,8 @@ class ImageFXApp(ctk.CTk):
 
         except Exception as e:
             CTkMessagebox(title="Erro Inesperado", message=f"Ocorreu um erro ao carregar o arquivo:\n{e}", icon="cancel")
-
-    # Cancela a geração de imagens
+    
+    # Inicia o cancelamento da geração de imagens
     def cancel_generation(self):
         if not self.cancel_requested:
             self.cancel_requested = True
@@ -504,13 +533,23 @@ class ImageFXApp(ctk.CTk):
         textbox.configure(state="disabled")
         ctk.CTkButton(license_win, text="Fechar", command=license_win.destroy).pack(pady=15)
 
-    # Limpa o texto do prompt atual
+    # Limpa o prompt e o título da página atual
     def clear_current_prompt(self):
+        # Limpa o campo de texto na interface
+        widget_dict = self.prompt_text_widgets[0]
+        widget_dict['textbox'].delete("1.0", "end")
+        
+        # Obtém o índice da página atual
         prompt_index = self.current_prompt_page
-        the_textbox = self.prompt_text_widgets[0]['textbox']
-        the_textbox.delete("1.0", "end")
-        self.prompt_data_list[prompt_index] = ""
-        self.status_label.configure(text=f"Prompt {prompt_index + 1} Limpo.")
+        
+        # Atualiza a lista de dados do prompt limpando o texto E o título
+        self.prompt_data_list[prompt_index] = ("", "")
+        
+        # Atualiza o contador de prompts (caso o prompt limpado fosse o último preenchido)
+        self.validate_and_update_prompts()
+        
+        # Re-exibe a página (agora limpa) para atualizar o rótulo do título
+        self._display_current_prompt_page()
 
     # Cola texto no prompt atual
     def paste_to_current_prompt(self):
@@ -520,7 +559,11 @@ class ImageFXApp(ctk.CTk):
             the_textbox = self.prompt_text_widgets[0]['textbox']
             the_textbox.delete("1.0", "end")
             the_textbox.insert("1.0", clipboard_content)
-            self.prompt_data_list[prompt_index] = clipboard_content.strip()
+            
+            # Preserva o título, atualiza o texto
+            current_title = self.prompt_data_list[prompt_index][1] if self.prompt_data_list[prompt_index] else ""
+            self.prompt_data_list[prompt_index] = (clipboard_content.strip(), current_title)
+            
             self.status_label.configure(text=f"Texto colado no Prompt {prompt_index + 1}.")
         except ctk.TclError:
             self.status_label.configure(text="Área de transferência vazia ou sem texto.")
@@ -554,12 +597,35 @@ class ImageFXApp(ctk.CTk):
 
     # Atualiza a interface com o prompt da página atual
     def _display_current_prompt_page(self):
+        # 1. Definição do limite de caracteres para o título
+        TITLE_LIMIT = 30 
+        
         total_prompts = int(self.prompt_count_var.get())
         prompt_index = self.current_prompt_page
         widget_dict = self.prompt_text_widgets[0]
-        widget_dict['label'].configure(text=f"Prompt {prompt_index + 1}:")
+        
+        prompt_tuple = self.prompt_data_list[prompt_index]
+        prompt_text = prompt_tuple[0] if prompt_tuple else ""
+        prompt_title_raw = prompt_tuple[1] if prompt_tuple and len(prompt_tuple) > 1 else ""
+
+        # 2. Formatação do título truncado (com ...)
+        prompt_title_display = prompt_title_raw.strip()
+        if len(prompt_title_display) > TITLE_LIMIT:
+            prompt_title_display = prompt_title_display[:TITLE_LIMIT].strip() + "..."
+
+        # 3. Modificação do label do Prompt
+        label_text = f"Prompt {prompt_index + 1}:"
+        
+        if prompt_title_display:
+            label_text += f" {prompt_title_display}" 
+            
+        widget_dict['label'].configure(text=label_text)
+        
+        # 4. Preenche o campo de texto
         widget_dict['textbox'].delete("1.0", "end")
-        widget_dict['textbox'].insert("1.0", self.prompt_data_list[prompt_index])
+        widget_dict['textbox'].insert("1.0", prompt_text)
+        
+        # 5. Atualiza botões de navegação de prompt
         self.prompt_page_label.configure(text=f"Prompt {prompt_index + 1} de {total_prompts}")
         self.prompt_prev_button.configure(state="normal" if self.current_prompt_page > 0 else "disabled")
         self.prompt_next_button.configure(state="normal" if self.current_prompt_page < total_prompts - 1 else "disabled")
@@ -568,7 +634,11 @@ class ImageFXApp(ctk.CTk):
     def _update_prompt_data(self, event, widget_index_on_page):
         prompt_index = self.current_prompt_page
         widget = self.prompt_text_widgets[0]['textbox']
-        self.prompt_data_list[prompt_index] = widget.get("1.0", "end-1c")
+        new_text = widget.get("1.0", "end-1c")
+        
+        # Mantém o título atual, mas atualiza o texto
+        current_title = self.prompt_data_list[prompt_index][1] if self.prompt_data_list[prompt_index] else ""
+        self.prompt_data_list[prompt_index] = (new_text, current_title)
 
     # Avança para o próximo prompt
     def _next_prompt_page(self):
@@ -678,14 +748,24 @@ class ImageFXApp(ctk.CTk):
             self.auth_token_entry.configure(border_color="red")
             self.auth_token_entry.focus_set()
             return
+        
+        # NOVO: Salva o token antes de iniciar a geração (presume-se que funcionará)
+        self._save_config(token=auth_token)
+        
         total_prompts_to_generate = int(self.prompt_count_var.get())
-        prompts = [p.strip() for p in self.prompt_data_list[:total_prompts_to_generate]]
+
+        prompts_with_text = [p[0].strip() for p in self.prompt_data_list[:total_prompts_to_generate]]
+        
         if regeneration_index is not None:
-            prompts = [self.prompt_data_list[regeneration_index]]
-        if not all(prompts):
+            prompts_to_run = [self.prompt_data_list[regeneration_index][0].strip()]
+        else:
+            prompts_to_run = prompts_with_text
+            
+        if not all(prompts_to_run):
             self.status_label.configure(text="Erro: Preencha todos os campos de prompt."); return
+            
         self.set_ui_state(generating=True)
-        thread = threading.Thread(target=self.run_generation_sequence, args=(prompts, auth_token, regeneration_index))
+        thread = threading.Thread(target=self.run_generation_sequence, args=(prompts_to_run, auth_token, regeneration_index))
         thread.daemon = True
         thread.start()
 
@@ -833,6 +913,10 @@ class ImageFXApp(ctk.CTk):
         self.current_page_index = page_index
         if not self.all_results: 
             return
+        
+        # Sincroniza o prompt de entrada com a página de resultados
+        self.current_prompt_page = page_index 
+        self._display_current_prompt_page() # Chama para exibir o prompt correto
 
         self.image_display_frame = ctk.CTkFrame(self.images_scroll_frame, fg_color="transparent")
         self.image_display_frame.pack(fill="both", expand=True)
@@ -901,8 +985,27 @@ class ImageFXApp(ctk.CTk):
         self.generate_button.grid(row=0, column=0, sticky="ew")
         self.generate_button.configure(state="normal")
         
+        # --- Lógica de Correção do IndexError ---
+        
         if self.all_results:
+            # 1. Garante que o índice atual é válido para o tamanho da lista.
+            max_index = len(self.all_results) - 1
+            
+            # Se o índice atual for maior que o tamanho da lista (pode acontecer após cancelamento), 
+            # ele retorna para a última página válida ou a primeira (índice 0).
+            if self.current_page_index > max_index:
+                self.current_page_index = max_index if max_index >= 0 else 0
+                
             self.show_page(self.current_page_index)
+            
+        else:
+             # Se não houver resultados (all_results está vazia), limpa o status e desativa botões.
+             self.images_scroll_frame.configure(label_text="Nenhum resultado gerado.")
+             self.page_label.configure(text="Página 0 de 0")
+             self.prev_button.configure(state="disabled")
+             self.next_button.configure(state="disabled")
+             self.save_button.configure(state="disabled")
+             self.regenerate_current_button.configure(state="disabled")
 
     # Ativa ou desativa a interface durante a geração
     def set_ui_state(self, generating: bool):
@@ -932,6 +1035,7 @@ class ImageFXApp(ctk.CTk):
         default_config = {
             "header": "ARQUIVO DE CONFIGURACAO DO PRISMAFX - NAO EDITE MANUALMENTE",
             "execution_count": 0,
+            "auth_token": "",
         }
         
         config_file_path = get_config_path()
@@ -948,14 +1052,23 @@ class ImageFXApp(ctk.CTk):
             donated = loaded_config.get("user_has_donated")
             if isinstance(donated, bool):
                 sanitized_config["user_has_donated"] = donated
+
+            token = loaded_config.get("auth_token", "")
+            if isinstance(token, str):
+                sanitized_config["auth_token"] = token
+                
             return sanitized_config
 
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return default_config
         
     # Salva as configurações no arquivo JSON
-    def _save_config(self):
+    def _save_config(self, token=""):
         config_file_path = get_config_path()
+
+        if token:
+            self.config["auth_token"] = token
+            
         with open(config_file_path, "w") as f:
             json.dump(self.config, f, indent=4)
 

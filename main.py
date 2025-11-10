@@ -183,6 +183,11 @@ class ImageFXApp(ctk.CTk):
         auth_frame.grid_columnconfigure(1, weight=0)
         self.auth_token_entry = ctk.CTkEntry(auth_frame, placeholder_text="Cole o seu token aqui", fg_color=self._editable_fg_color)
         self.auth_token_entry.grid(row=0, column=0, sticky="ew")
+        
+        saved_token = self.config.get("auth_token")
+        if saved_token:
+            self.auth_token_entry.insert(0, saved_token)
+            
         self.token_help_button = ctk.CTkButton(auth_frame, text="?", width=30, command=self.show_token_help)
         self.token_help_button.grid(row=0, column=1, padx=(5, 0))
         self._default_border_color = self.auth_token_entry.cget("border_color")
@@ -333,6 +338,7 @@ class ImageFXApp(ctk.CTk):
                     raw_title = match.group(1).strip()
                     
                     # 3. VERIFICAÇÃO DE SEGURANÇA FINAL: Remove o traço/hífen e qualquer espaço subsequente
+                    # usando re.sub para maior robustez
                     raw_title = re.sub(r'^[\s–—-]+', '', raw_title).strip()
                     
                     current_prompt_title = raw_title
@@ -369,7 +375,7 @@ class ImageFXApp(ctk.CTk):
 
         except Exception as e:
             CTkMessagebox(title="Erro Inesperado", message=f"Ocorreu um erro ao carregar o arquivo:\n{e}", icon="cancel")
-
+    
     # Inicia o cancelamento da geração de imagens
     def cancel_generation(self):
         if not self.cancel_requested:
@@ -591,6 +597,7 @@ class ImageFXApp(ctk.CTk):
 
     # Atualiza a interface com o prompt da página atual
     def _display_current_prompt_page(self):
+        # 1. Definição do limite de caracteres para o título
         TITLE_LIMIT = 30 
         
         total_prompts = int(self.prompt_count_var.get())
@@ -601,10 +608,12 @@ class ImageFXApp(ctk.CTk):
         prompt_text = prompt_tuple[0] if prompt_tuple else ""
         prompt_title_raw = prompt_tuple[1] if prompt_tuple and len(prompt_tuple) > 1 else ""
 
+        # 2. Formatação do título truncado (com ...)
         prompt_title_display = prompt_title_raw.strip()
         if len(prompt_title_display) > TITLE_LIMIT:
             prompt_title_display = prompt_title_display[:TITLE_LIMIT].strip() + "..."
 
+        # 3. Modificação do label do Prompt
         label_text = f"Prompt {prompt_index + 1}:"
         
         if prompt_title_display:
@@ -623,13 +632,13 @@ class ImageFXApp(ctk.CTk):
 
     # Salva o texto do prompt
     def _update_prompt_data(self, event, widget_index_on_page):
-            prompt_index = self.current_prompt_page
-            widget = self.prompt_text_widgets[0]['textbox']
-            new_text = widget.get("1.0", "end-1c")
-            
-            # Mantém o título atual, mas atualiza o texto
-            current_title = self.prompt_data_list[prompt_index][1] if self.prompt_data_list[prompt_index] else ""
-            self.prompt_data_list[prompt_index] = (new_text, current_title)
+        prompt_index = self.current_prompt_page
+        widget = self.prompt_text_widgets[0]['textbox']
+        new_text = widget.get("1.0", "end-1c")
+        
+        # Mantém o título atual, mas atualiza o texto
+        current_title = self.prompt_data_list[prompt_index][1] if self.prompt_data_list[prompt_index] else ""
+        self.prompt_data_list[prompt_index] = (new_text, current_title)
 
     # Avança para o próximo prompt
     def _next_prompt_page(self):
@@ -739,6 +748,9 @@ class ImageFXApp(ctk.CTk):
             self.auth_token_entry.configure(border_color="red")
             self.auth_token_entry.focus_set()
             return
+        
+        # NOVO: Salva o token antes de iniciar a geração (presume-se que funcionará)
+        self._save_config(token=auth_token)
         
         total_prompts_to_generate = int(self.prompt_count_var.get())
 
@@ -973,8 +985,27 @@ class ImageFXApp(ctk.CTk):
         self.generate_button.grid(row=0, column=0, sticky="ew")
         self.generate_button.configure(state="normal")
         
+        # --- Lógica de Correção do IndexError ---
+        
         if self.all_results:
+            # 1. Garante que o índice atual é válido para o tamanho da lista.
+            max_index = len(self.all_results) - 1
+            
+            # Se o índice atual for maior que o tamanho da lista (pode acontecer após cancelamento), 
+            # ele retorna para a última página válida ou a primeira (índice 0).
+            if self.current_page_index > max_index:
+                self.current_page_index = max_index if max_index >= 0 else 0
+                
             self.show_page(self.current_page_index)
+            
+        else:
+             # Se não houver resultados (all_results está vazia), limpa o status e desativa botões.
+             self.images_scroll_frame.configure(label_text="Nenhum resultado gerado.")
+             self.page_label.configure(text="Página 0 de 0")
+             self.prev_button.configure(state="disabled")
+             self.next_button.configure(state="disabled")
+             self.save_button.configure(state="disabled")
+             self.regenerate_current_button.configure(state="disabled")
 
     # Ativa ou desativa a interface durante a geração
     def set_ui_state(self, generating: bool):
@@ -1004,6 +1035,7 @@ class ImageFXApp(ctk.CTk):
         default_config = {
             "header": "ARQUIVO DE CONFIGURACAO DO PRISMAFX - NAO EDITE MANUALMENTE",
             "execution_count": 0,
+            "auth_token": "",
         }
         
         config_file_path = get_config_path()
@@ -1020,14 +1052,23 @@ class ImageFXApp(ctk.CTk):
             donated = loaded_config.get("user_has_donated")
             if isinstance(donated, bool):
                 sanitized_config["user_has_donated"] = donated
+
+            token = loaded_config.get("auth_token", "")
+            if isinstance(token, str):
+                sanitized_config["auth_token"] = token
+                
             return sanitized_config
 
         except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return default_config
         
     # Salva as configurações no arquivo JSON
-    def _save_config(self):
+    def _save_config(self, token=""):
         config_file_path = get_config_path()
+
+        if token:
+            self.config["auth_token"] = token
+            
         with open(config_file_path, "w") as f:
             json.dump(self.config, f, indent=4)
 
